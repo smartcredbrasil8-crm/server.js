@@ -1,93 +1,62 @@
-import express from "express";
-import crypto from "crypto";
-import fetch from "node-fetch";
+const express = require('express');
+const bodyParser = require('body-parser');
+const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 10000;
 
-// ===== Variáveis de ambiente =====
-const ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-const PIXEL_ID = process.env.FB_PIXEL_ID;
+// Substitua pelos seus valores
+const PIXEL_ID = '568969266119506';
+const ACCESS_TOKEN = 'EAADU2T8mQZAUBPRbatdIN038ucTUcp7O8tENhNCZBvX5LCGBzpcawiN7ZAiTG75X9o5cbJP8Kc2BZAoo3FEJGtZAzCEuXNxPpWEoYxGnbfuBleZAnfthkWmMENBRsB5u2rD2DBB7Q36t2tSRhec8tZA2IKt5h2EzSonvy6oClmbVH6lGaVRsB7xcdUkpsZCLv8ZCw3AZDZD';
 
-// ===== 1️⃣ Verificação do Webhook =====
-const VERIFY_TOKEN = "smartcred_webhook";
+// Permitir receber JSON
+app.use(bodyParser.json());
 
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode && token === VERIFY_TOKEN) {
-    console.log("Webhook validado com sucesso!");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
-  }
-});
-
-// ===== 2️⃣ Receber leads do Facebook =====
-function sha256(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
-}
-function normalizeEmail(email) { return email.trim().toLowerCase(); }
-function normalizePhone(phone) { return phone.replace(/\D/g, ""); }
-
-app.post("/webhook", async (req, res) => {
+// Rota para receber webhook do CRM
+app.post('/lead-event', async (req, res) => {
   try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const leadId = changes?.value?.leadgen_id;
+    const { etapa, leadId, email } = req.body;
 
-    const fieldData = changes?.value?.field_data || [];
-    const lead = {};
-    fieldData.forEach(f => {
-      if (f.name === "email") lead.email = f.values[0];
-      if (f.name === "phone_number") lead.phone = f.values[0];
-      if (f.name === "first_name") lead.firstName = f.values[0];
-      if (f.name === "last_name") lead.lastName = f.values[0];
-    });
-
-    const user_data = {
-      em: lead.email ? sha256(normalizeEmail(lead.email)) : undefined,
-      ph: lead.phone ? sha256(normalizePhone(lead.phone)) : undefined,
-      fn: lead.firstName ? sha256(lead.firstName.trim().toLowerCase()) : undefined,
-      ln: lead.lastName ? sha256(lead.lastName.trim().toLowerCase()) : undefined,
-      external_id: leadId ? sha256(leadId) : undefined
-    };
-    Object.keys(user_data).forEach(key => {
-      if (!user_data[key]) delete user_data[key];
-    });
-
-    const payload = {
-      data: [
-        {
-          event_name: "Lead",
-          event_time: Math.floor(Date.now() / 1000),
-          action_source: "lead_ads",
-          user_data
-        }
-      ]
+    // Nome do evento baseado na etapa
+    const eventoMap = {
+      1: 'Lead_Atendeu',
+      2: 'Lead_Oportunidade',
+      3: 'Lead_Avancado',
+      4: 'Lead_Video',
+      5: 'Lead_Vencemos'
     };
 
-    const response = await fetch(
+    const nomeEvento = eventoMap[etapa];
+
+    if (!nomeEvento) {
+      return res.status(400).send({ error: 'Etapa inválida' });
+    }
+
+    // Enviar evento pro Facebook Pixel via Conversions API
+    const response = await axios.post(
       `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        data: [
+          {
+            event_name: nomeEvento,
+            event_time: Math.floor(Date.now() / 1000),
+            user_data: {
+              em: [Buffer.from(email).toString('base64')]
+            }
+          }
+        ]
       }
     );
 
-    const result = await response.json();
-    console.log("Resposta do Conversions API:", result);
+    console.log('Evento enviado:', response.data);
+    res.status(200).send({ success: true, data: response.data });
 
-    res.status(200).send("Webhook processado com sucesso");
   } catch (error) {
-    console.error("Erro no webhook:", error);
-    res.status(500).send("Erro interno");
+    console.error('Erro ao enviar evento:', error.response?.data || error.message);
+    res.status(500).send({ error: error.message });
   }
 });
 
-// ===== 3️⃣ Inicia servidor =====
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
