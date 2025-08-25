@@ -1,14 +1,14 @@
 {
-  "name": "facebook-leads-webhook",
+  "name": "crm-to-pixel",
   "version": "1.0.0",
-  "description": "Webhook para Lead Ads e Conversions API",
-  "type": "module",
+  "description": "API para enviar eventos do Greenn Sales para o Facebook Pixel",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.1"
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.2"
   }
 }
