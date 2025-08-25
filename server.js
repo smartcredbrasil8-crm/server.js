@@ -1,62 +1,82 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
+const express = require("express");
+const axios = require("axios");
+const bodyParser = require("body-parser");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Substitua pelos seus valores
-const PIXEL_ID = '568969266119506';
-const ACCESS_TOKEN = 'EAADU2T8mQZAUBPRbatdIN038ucTUcp7O8tENhNCZBvX5LCGBzpcawiN7ZAiTG75X9o5cbJP8Kc2BZAoo3FEJGtZAzCEuXNxPpWEoYxGnbfuBleZAnfthkWmMENBRsB5u2rD2DBB7Q36t2tSRhec8tZA2IKt5h2EzSonvy6oClmbVH6lGaVRsB7xcdUkpsZCLv8ZCw3AZDZD';
-
-// Permitir receber JSON
+// Configura o body-parser para receber JSON
 app.use(bodyParser.json());
 
-// Rota para receber webhook do CRM
-app.post('/lead-event', async (req, res) => {
+// Configurações do Pixel
+const PIXEL_ID = "568969266119506";
+const ACCESS_TOKEN = "EAADU2T8mQZAUBPRbatdIN038ucTUcp7O8tENhNCZBvX5LCGBzpcawiN7ZAiTG75X9o5cbJP8Kc2BZAoo3FEJGtZAzCEuXNxPpWEoYxGnbfuBleZAnfthkWmMENBRsB5u2rD2DBB7Q36t2tSRhec8tZA2IKt5h2EzSonvy6oClmbVH6lGaVRsB7xcdUkpsZCLv8ZCw3AZDZD";
+
+// Mapeamento das etapas do funil do CRM para eventos do Pixel
+const funilParaEvento = {
+  "1_atendeu": "LeadAtendeu",
+  "2_oportunidade": "Oportunidade",
+  "3_avancado": "Avancado",
+  "4_video": "VisualizouVideo",
+  "5_vencemos": "Vencemos"
+};
+
+// Função para hash SHA256 (requerido pelo Facebook)
+function hashSHA256(data) {
+  return crypto.createHash('sha256').update(data.trim().toLowerCase()).digest('hex');
+}
+
+// Endpoint que recebe webhooks do Greenn Sales
+app.post("/webhook", async (req, res) => {
+  console.log("Recebido webhook:", req.body);
+
   try {
-    const { etapa, leadId, email } = req.body;
+    const { leadId, etapa, nome, email, telefone } = req.body;
+    const eventName = funilParaEvento[etapa];
 
-    // Nome do evento baseado na etapa
-    const eventoMap = {
-      1: 'Lead_Atendeu',
-      2: 'Lead_Oportunidade',
-      3: 'Lead_Avancado',
-      4: 'Lead_Video',
-      5: 'Lead_Vencemos'
-    };
-
-    const nomeEvento = eventoMap[etapa];
-
-    if (!nomeEvento) {
-      return res.status(400).send({ error: 'Etapa inválida' });
+    if (!eventName) {
+      console.log("Etapa desconhecida, ignorando evento.");
+      return res.status(400).send("Etapa inválida");
     }
 
-    // Enviar evento pro Facebook Pixel via Conversions API
-    const response = await axios.post(
-      `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
-      {
-        data: [
-          {
-            event_name: nomeEvento,
-            event_time: Math.floor(Date.now() / 1000),
-            user_data: {
-              em: [Buffer.from(email).toString('base64')]
-            }
+    // Monta o payload para o Facebook Conversions API
+    const payload = {
+      data: [
+        {
+          event_name: eventName,
+          event_time: Math.floor(Date.now() / 1000),
+          action_source: "website",
+          event_source_url: "https://seusite.com", // opcional
+          user_data: {
+            client_user_agent: req.headers["user-agent"] || "",
+            em: email ? hashSHA256(email) : undefined,
+            fn: nome ? hashSHA256(nome) : undefined,
+            ph: telefone ? hashSHA256(telefone) : undefined
+          },
+          custom_data: {
+            leadId: leadId
           }
-        ]
-      }
+        }
+      ]
+    };
+
+    // Envia evento para o Pixel
+    const fbResponse = await axios.post(
+      `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
+      payload
     );
 
-    console.log('Evento enviado:', response.data);
-    res.status(200).send({ success: true, data: response.data });
+    console.log("Resposta do Pixel:", fbResponse.data);
+    res.status(200).send("Evento enviado ao Pixel");
 
   } catch (error) {
-    console.error('Erro ao enviar evento:', error.response?.data || error.message);
-    res.status(500).send({ error: error.message });
+    console.error("Erro ao enviar evento:", error.response?.data || error.message);
+    res.status(500).send("Erro interno");
   }
 });
 
+// Inicia o servidor
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
