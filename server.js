@@ -6,8 +6,8 @@ const app = express();
 app.use(express.json());
 
 // ===== Variáveis de ambiente =====
-const ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN; // Token do Facebook
-const PIXEL_ID = process.env.FB_PIXEL_ID;        // ID do Pixel
+const ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
+const PIXEL_ID = process.env.FB_PIXEL_ID;
 
 // ===== 1️⃣ Verificação do Webhook =====
 const VERIFY_TOKEN = "smartcred_webhook";
@@ -54,7 +54,6 @@ app.post("/webhook", async (req, res) => {
       ln: lead.lastName ? sha256(lead.lastName.trim().toLowerCase()) : undefined,
       external_id: leadId ? sha256(leadId) : undefined
     };
-
     Object.keys(user_data).forEach(key => {
       if (!user_data[key]) delete user_data[key];
     });
