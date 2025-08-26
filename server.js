@@ -1,6 +1,5 @@
 const express = require("express");
 const bodyParser = require("body-parser");
-const fetch = require("node-fetch");
 const crypto = require("crypto");
 
 const app = express();
@@ -16,7 +15,7 @@ const normalizar = (texto) =>
     ? texto
         .normalize("NFD") // separa acentos
         .replace(/[\u0300-\u036f]/g, "") // remove acentos
-        .toLowerCase() // caixa baixa
+        .toLowerCase()
     : "";
 
 // Função para gerar hash SHA256
@@ -50,7 +49,7 @@ app.post("/webhook", async (req, res) => {
     // Seleciona o evento correspondente ou usa Lead como fallback
     const fbEvent = etapaParaEvento[etapaNormalizada] || "Lead";
 
-    // Monta payload para o Facebook Conversions API com hash dos dados
+    // Monta payload para o Facebook Conversions API
     const payload = {
       data: [
         {
@@ -68,7 +67,7 @@ app.post("/webhook", async (req, res) => {
       ]
     };
 
-    // Envia para Facebook CAPI
+    // Envia para Facebook CAPI (usando fetch nativo do Node.js)
     const response = await fetch(
       `https://graph.facebook.com/v13.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`,
       {
