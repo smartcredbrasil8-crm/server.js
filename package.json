@@ -1,7 +1,7 @@
 {
   "name": "crm-to-pixel",
   "version": "1.0.0",
-  "description": "API para enviar eventos do Greenn Sales para o Facebook Pixel",
+  "description": "API para enviar eventos do CRM para o Facebook Pixel",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -11,8 +11,5 @@
     "express": "^4.18.2",
     "body-parser": "^1.20.2",
     "node-fetch": "^3.3.2"
-  },
-  "engines": {
-    "node": "22.x"
   }
 }
