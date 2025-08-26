@@ -21,11 +21,11 @@ function sha256Hash(value) {
 
 // Mapeamento CRM -> Eventos Facebook
 const eventosFB = {
-  "atendeu": { name: "Lead", customData: {} },
-  "Oportunidade": { name: "ViewContent", customData: {} },
-  "Avançado": { name: "AddToCart", customData: {} },
-  "Vídeo": { name: "InitiateCheckout", customData: {} },
-  "Vencemos": { name: "Purchase", customData: { value: 1000, currency: "BRL" } } // ajuste value conforme necessário
+  "ATENDEU": { name: "Lead", customData: {} },
+  "OPORTUNIDADE": { name: "ViewContent", customData: {} },
+  "AVANÇADO": { name: "AddToCart", customData: {} },
+  "VIDEO": { name: "InitiateCheckout", customData: {} },
+  "VENCEMOS": { name: "Purchase", customData: { value: 1000, currency: "BRL" } } // ajuste value conforme necessário
 };
 
 app.post("/webhook", async (req, res) => {
