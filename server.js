@@ -1,85 +1,103 @@
-import express from "express";
-import bodyParser from "body-parser";
-import fetch from "node-fetch";
-import crypto from "crypto";
+// server.js
+const express = require("express");
+const axios = require("axios");
+const crypto = require("crypto");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json({ limit: "10mb" }));
 
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPZAwHhvxdaNRtB2WDIqNlctT9jKk0akPQB013Bv3ZBOBsWCsvlKKKAHEOXLTW9XTLMd6vTV0t1O1MQq7yHNfkc6WL0wXSIDjT1Nl8ZBh2s31eu5gGxUfN4SRAKpstFV2XZBf1dNRvdsscZCp7fAT4C9kjo4fxThuZBoEvMjZAUytZBlJlTRBrQUSoAZDZD"; // substitua pelo token real
-const PIXEL_ID = "568969266119506"; // substitua pelo Pixel real
+const PORT = process.env.PORT || 10000;
 
-// Função para enviar payload para Facebook Conversions API
-async function enviarParaFacebook(payload) {
-  const url = `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+// ⚠️ ID e TOKEN fixos
+const PIXEL_ID = "568969266119506";
+const ACCESS_TOKEN = "EAADU2T8mQZAUBPZAwHhvxdaNRtB2WDIqNlctT9jKk0akPQB013Bv3ZBOBsWCsvlKKKAHEOXLTW9XTLMd6vTV0t1O1MQq7yHNfkc6WL0wXSIDjT1Nl8ZBh2s31eu5gGxUfN4SRAKpstFV2XZBf1dNRvdsscZCp7fAT4C9kjo4fxThuZBoEvMjZAUytZBlJlTRBrQUSoAZDZD";
 
-  const data = await response.json();
-  console.log("📤 Resposta do Conversions API:", data);
-  return data;
-}
-
-// Mapeamento de etapas do CRM para lead_status
+// Mapeamento de etapas → lead_status aceitos pela Meta
 const etapaParaLeadStatus = {
-  "Oportunidade": "Em analise",
-  "Vídeo": "Qualificado",
-  "Vencemos": "Convertido"
+  "oportunidade": "OPEN",
+  "video": "QUALIFIED",
+  "vencemos": "CONVERTED"
 };
 
-// Endpoint para receber webhook do CRM
+// Funções utilitárias
+function normalizar(str) {
+  if (!str && str !== "") return "";
+  return String(str).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+function hashEmail(value) {
+  if (!value) return undefined;
+  return crypto.createHash("sha256").update(String(value).trim().toLowerCase()).digest("hex");
+}
+function hashName(value) {
+  if (!value) return undefined;
+  return crypto.createHash("sha256").update(String(value).trim().toLowerCase()).digest("hex");
+}
+function hashPhone(value) {
+  if (!value) return undefined;
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) return undefined;
+  return crypto.createHash("sha256").update(digits).digest("hex");
+}
+
+// Rota principal do webhook
 app.post("/webhook", async (req, res) => {
   try {
-    const leadData = req.body.lead || {};
-    const tagName = req.body.tag?.name || "Desconhecido";
+    const payloadIn = req.body || {};
+    const lead = payloadIn.lead || payloadIn;
+    const tagName = payloadIn.tag?.name || lead.etapa || lead.status || "";
 
-    // Normaliza texto (remove acentos, ignora maiúsculas/minúsculas)
-    const etapaNormalizada = tagName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const etapaNorm = normalizar(tagName);
+    const lead_status = etapaParaLeadStatus[etapaNorm] || "UNKNOWN";
 
-    // Busca lead_status mapeado
-    let lead_status = "Desconhecido";
-    for (const key in etapaParaLeadStatus) {
-      const keyNormalizada = key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      if (etapaNormalizada === keyNormalizada) {
-        lead_status = etapaParaLeadStatus[key];
-        break;
-      }
+    // user_data com hash
+    const user_data = {};
+    const he = hashEmail(lead.email);
+    const hp = hashPhone(lead.phone || lead.phone_number || lead.telefone);
+    const hn = hashName(lead.name || lead.first_name || lead.nome);
+    if (he) user_data.em = he;
+    if (hp) user_data.ph = hp;
+    if (hn) user_data.fn = hn;
+
+    // custom_data
+    const custom_data = { lead_status };
+    if (lead_status === "CONVERTED") {
+      const valor = (lead.valor_purchase || lead.value || lead.purchase_value) || 10000;
+      custom_data.value = Number(valor);
+      custom_data.currency = (lead.moeda || lead.currency || "BRL").toUpperCase();
     }
 
-    // Monta payload para Conversions API (hash de PII)
-    const payload = {
-      data: [
-        {
-          event_name: "Lead",
-          event_time: Math.floor(Date.now() / 1000),
-          user_data: {
-            em: leadData.email ? crypto.createHash("sha256").update(leadData.email.trim().toLowerCase()).digest("hex") : undefined,
-            ph: leadData.phone ? crypto.createHash("sha256").update(leadData.phone.trim()).digest("hex") : undefined,
-            fn: leadData.name ? crypto.createHash("sha256").update(leadData.name.trim().toLowerCase()).digest("hex") : undefined
-          },
-          custom_data: {
-            lead_status: lead_status
-          },
-          action_source: "website"
-        }
-      ]
+    const event = {
+      event_name: "Lead",
+      event_time: Math.floor(Date.now() / 1000),
+      user_data,
+      custom_data,
+      action_source: "website"
     };
 
-    // Envia para o Facebook
-    await enviarParaFacebook(payload);
+    const fbPayload = { data: [event] };
 
-    res.json({ success: true, lead_status });
-  } catch (error) {
-    console.error("❌ Erro ao processar webhook:", error);
-    res.status(500).json({ error: error.message });
+    console.log("📥 Recebido webhook:", {
+      lead_id: lead.id || lead.leadId,
+      tagName,
+      lead_status,
+      user_data_keys: Object.keys(user_data),
+      custom_data
+    });
+
+    const fbUrl = `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
+    const fbResp = await axios.post(fbUrl, fbPayload, { headers: { "Content-Type": "application/json" } });
+
+    console.log("📤 Resposta Conversions API:", fbResp.data);
+
+    return res.json({ success: true, lead_status, fbResponse: fbResp.data });
+  } catch (err) {
+    console.error("❌ Erro webhook:", err?.response?.data || err.message || err);
+    return res.status(500).json({ success: false, error: (err?.response?.data || err.message || String(err)) });
   }
 });
 
-// Porta de escuta (Render precisa da variável de ambiente PORT)
-const PORT = process.env.PORT || 10000;
+app.get("/", (req, res) => res.send("Webhook listener ok ✅"));
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
