@@ -1,73 +1,67 @@
-// server.js
-const express = require('express');
-const axios = require('axios');
+const express = require("express");
+const bodyParser = require("body-parser");
+const axios = require("axios");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configurar para receber JSON
-app.use(express.json());
-
-// Seu Pixel ID e Token do Pixel
-const PIXEL_ID = "568969266119506";
+// Configurações do Pixel
+const PIXEL_ID = "568969266119506"; // ID do Pixel
 const ACCESS_TOKEN = "EAADU2T8mQZAUBPRbatdIN038ucTUcp7O8tENhNCZBvX5LCGBzpcawiN7ZAiTG75X9o5cbJP8Kc2BZAoo3FEJGtZAzCEuXNxPpWEoYxGnbfuBleZAnfthkWmMENBRsB5u2rD2DBB7Q36t2tSRhec8tZA2IKt5h2EzSonvy6oClmbVH6lGaVRsB7xcdUkpsZCLv8ZCw3AZDZD";
 
-// Mapeamento de etapas do CRM para eventos do Pixel
-const etapaParaEvento = {
-  "1_atendeu": "LeadAtendeu",
-  "2_oportunidade": "LeadOportunidade",
-  "3_avancado": "LeadAvancado",
-  "4_video": "LeadVideo",
-  "5_vencemos": "LeadVencemos"
+// Middleware para processar JSON
+app.use(bodyParser.json());
+
+// Função para converter PII em SHA256
+function sha256Hash(value) {
+  if (!value) return null;
+  return crypto.createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+
+// Mapeamento de etapas para eventos amigáveis
+const eventos = {
+  "1_atendeu": "Lead Atendido",
+  "2_oportunidade": "Oportunidade",
+  "3_avancado": "Avançado",
+  "4_video": "Assistiu Video",
+  "5_vencemos": "Fechamento"
 };
 
-// Rota do webhook
+// Endpoint para receber webhooks do CRM
 app.post("/webhook", async (req, res) => {
-    try {
-        const { leadId, etapa, nome, email, telefone } = req.body;
-        console.log("Recebido webhook:", req.body);
+  try {
+    console.log("Recebido webhook:", req.body);
 
-        if (!etapaParaEvento[etapa]) {
-            console.log("Etapa desconhecida:", etapa);
-            return res.status(400).send("Etapa desconhecida");
-        }
+    const { leadId, etapa, nome, email, telefone } = req.body;
 
-        const evento = etapaParaEvento[etapa];
+    // Converte PII
+    const userData = {
+      em: sha256Hash(email),
+      ph: sha256Hash(telefone),
+      fn: sha256Hash(nome)
+    };
 
-        // Monta payload para o Conversions API
-        const payload = {
-            data: [
-                {
-                    event_name: evento,
-                    event_time: Math.floor(Date.now() / 1000),
-                    action_source: "website",
-                    event_source_url: "https://seu-site.com",
-                    user_data: {
-                        email: email ? [email] : [],
-                        phone: telefone ? [telefone] : []
-                    },
-                    custom_data: {
-                        lead_id: leadId,
-                        nome: nome
-                    }
-                }
-            ]
-        };
+    // Evento para enviar ao Pixel
+    const eventData = {
+      event_name: eventos[etapa] || "Lead Atualizado",
+      event_time: Math.floor(Date.now() / 1000),
+      user_data: userData,
+      custom_data: { lead_id: leadId }
+    };
 
-        // Envia para o Pixel via Conversions API
-        const url = `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
+    // Envia para Facebook Conversions API
+    const url = `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
+    const response = await axios.post(url, { data: [eventData] });
 
-        const response = await axios.post(url, payload);
-        console.log("Resposta do Conversions API:", response.data);
-
-        res.status(200).send("Evento enviado");
-    } catch (error) {
-        console.error("Erro ao processar webhook:", error.response ? error.response.data : error.message);
-        res.status(500).send("Erro no servidor");
-    }
+    console.log("Resposta do Conversions API:", response.data);
+    res.status(200).send("Evento enviado com sucesso!");
+  } catch (error) {
+    console.error("Erro ao processar webhook:", error.response ? error.response.data : error.message);
+    res.status(500).send("Erro interno do servidor");
+  }
 });
 
-// Inicia servidor
 app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
