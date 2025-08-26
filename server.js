@@ -2,6 +2,8 @@ const express = require("express");
 const axios = require("axios");
 const bodyParser = require("body-parser");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -27,9 +29,19 @@ function hashSHA256(data) {
   return crypto.createHash('sha256').update(data.trim().toLowerCase()).digest('hex');
 }
 
+// Função para salvar logs locais
+function logEventoLocal(evento) {
+  const logPath = path.join(__dirname, "events.log");
+  const logLinha = `[${new Date().toISOString()}] ${JSON.stringify(evento)}\n`;
+  fs.appendFile(logPath, logLinha, (err) => {
+    if (err) console.error("Erro ao salvar log local:", err);
+  });
+}
+
 // Endpoint que recebe webhooks do Greenn Sales
 app.post("/webhook", async (req, res) => {
   console.log("Recebido webhook:", req.body);
+  logEventoLocal({ tipo: "recebido", dados: req.body });
 
   try {
     const { leadId, etapa, nome, email, telefone } = req.body;
@@ -37,6 +49,7 @@ app.post("/webhook", async (req, res) => {
 
     if (!eventName) {
       console.log("Etapa desconhecida, ignorando evento.");
+      logEventoLocal({ tipo: "erro", mensagem: "Etapa inválida", etapa });
       return res.status(400).send("Etapa inválida");
     }
 
@@ -68,10 +81,13 @@ app.post("/webhook", async (req, res) => {
     );
 
     console.log("Resposta do Pixel:", fbResponse.data);
+    logEventoLocal({ tipo: "enviado", eventName, fbResponse: fbResponse.data });
+
     res.status(200).send("Evento enviado ao Pixel");
 
   } catch (error) {
     console.error("Erro ao enviar evento:", error.response?.data || error.message);
+    logEventoLocal({ tipo: "erro", mensagem: error.response?.data || error.message });
     res.status(500).send("Erro interno");
   }
 });
