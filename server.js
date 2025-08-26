@@ -23,6 +23,11 @@ const etapaParaLeadStatus = {
     "VENCEMOS": "Converted"
 };
 
+// Normaliza texto (remove acentos, ignora maiúsculas/minúsculas)
+function normalizeTag(tagName) {
+    return tagName.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 app.post("/webhook", async (req, res) => {
     try {
         const { lead, tag } = req.body;
@@ -31,7 +36,7 @@ app.post("/webhook", async (req, res) => {
             return res.status(400).json({ error: "Invalid payload: missing lead or tag" });
         }
 
-        const tagNormalized = tag.name.trim().toUpperCase();
+        const tagNormalized = normalizeTag(tag.name);
         const leadStatus = etapaParaLeadStatus[tagNormalized] || "Unknown";
 
         // Dados do usuário (em, ph, fn) devem ir em hash SHA256
@@ -54,13 +59,19 @@ app.post("/webhook", async (req, res) => {
             ]
         };
 
-        const response = await fetch(`https://graph.facebook.com/v23.0/${FB_PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
+        const response = await fetch(
+            `https://graph.facebook.com/v23.0/${FB_PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            }
+        );
 
         const fbResponse = await response.json();
+
+        console.log("📥 Recebido webhook:", req.body);
+        console.log("📤 Resposta Conversions API:", fbResponse);
 
         res.json({ success: true, fbResponse });
     } catch (error) {
