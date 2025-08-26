@@ -1,84 +1,105 @@
-// server.js
 import express from "express";
 import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import crypto from "crypto";
 
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-// Substitua pelo seu Pixel ID e Token
+// Configurações do Pixel
 const PIXEL_ID = "568969266119506";
 const ACCESS_TOKEN = "EAADU2T8mQZAUBPZAwHhvxdaNRtB2WDIqNlctT9jKk0akPQB013Bv3ZBOBsWCsvlKKKAHEOXLTW9XTLMd6vTV0t1O1MQq7yHNfkc6WL0wXSIDjT1Nl8ZBh2s31eu5gGxUfN4SRAKpstFV2XZBf1dNRvdsscZCp7fAT4C9kjo4fxThuZBoEvMjZAUytZBlJlTRBrQUSoAZDZD";
 
-// Mapear etapas do CRM para eventos do Facebook Pixel
-const etapaParaEvento = {
-  "Atendeu": "Lead",
-  "Oportunidade": "ViewContent",
-  "Avancado": "AddToCart",
-  "Video": "InitiateCheckout",
-  "Vencemos": "Purchase"
-};
+// Inicializa o Express
+const app = express();
+const PORT = process.env.PORT || 10000;
 
-// Middleware
 app.use(bodyParser.json());
 
-// Endpoint do webhook
+// Função para gerar SHA256
+function hashSHA256(value) {
+  return crypto.createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+
+// Mapeamento de etapas para eventos do Facebook
+const etapaToEvent = {
+  "ATENDEU": "Lead",
+  "OPORTUNIDADE": "ViewContent",
+  "AVANCADO": "AddToCart",
+  "VIDEO": "InitiateCheckout",
+  "VENCEMOS": "Purchase"
+};
+
+// Webhook para receber leads do CRM
 app.post("/webhook", async (req, res) => {
-  const leadData = req.body;
-
-  if (!leadData || !leadData.etapa) {
-    return res.status(400).json({ error: "Webhook inválido ou etapa não definida" });
-  }
-
-  // Normaliza etapa, remove acentos e espaços
-  const etapa = leadData.etapa.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  const fbEvent = etapaParaEvento[etapa];
-
-  if (!fbEvent) {
-    return res.status(400).json({ error: `Etapa desconhecida: ${etapa}` });
-  }
-
-  // Monta payload para Facebook Conversions API
-  const payload = {
-    data: [
-      {
-        event_name: fbEvent,
-        event_time: Math.floor(Date.now() / 1000),
-        action_source: "website",
-        event_source_url: leadData.url || "https://example.com",
-        user_data: {
-          em: leadData.email ? [sha256(leadData.email)] : [],
-          ph: leadData.telefone ? [sha256(leadData.telefone)] : []
-        },
-        custom_data: fbEvent === "Purchase" ? { currency: "BRL", value: 1 } : {}
-      }
-    ]
-  };
-
   try {
+    const leadData = req.body.lead;
+    const tagData = req.body.tag;
+
+    if (!leadData || !tagData) {
+      return res.status(400).send({ error: "lead ou tag ausentes" });
+    }
+
+    // Normaliza o nome da etapa: remove acentos, maiúsculas, espaços extras
+    const etapa = tagData.name
+      .normalize("NFD") // separa acentos
+      .replace(/[\u0300-\u036f]/g, "") // remove acentos
+      .trim()
+      .toUpperCase();
+
+    const eventoFacebook = etapaToEvent[etapa];
+
+    if (!eventoFacebook) {
+      return res.status(400).send({ error: "Etapa do lead não mapeada para evento Facebook" });
+    }
+
+    // Cria user_data com hash SHA256
+    const user_data = {
+      em: hashSHA256(leadData.email || ""),
+      ph: hashSHA256(leadData.phone || ""),
+      fn: hashSHA256(leadData.name || "")
+    };
+
+    // Cria custom_data
+    const custom_data = {
+      lead_status: tagData.name
+    };
+
+    // Para evento de Purchase, adiciona value e currency
+    if (eventoFacebook === "Purchase") {
+      custom_data.value = 10000; // Valor de R$ 10.000,00
+      custom_data.currency = "BRL";
+    }
+
+    // Objeto do evento
+    const eventObj = {
+      data: [
+        {
+          event_name: eventoFacebook,
+          event_time: Math.floor(Date.now() / 1000),
+          user_data: user_data,
+          custom_data: custom_data,
+          event_source_url: "CRM",
+        }
+      ]
+    };
+
+    // Envia para a Conversions API
     const response = await fetch(`https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(eventObj)
     });
 
-    const result = await response.json();
-    console.log("📤 Resposta do Conversions API:", result);
+    const fbResponse = await response.json();
 
-    res.json({ success: true, fbEvent: fbEvent, result });
-  } catch (error) {
-    console.error("Erro ao processar webhook:", error);
-    res.status(500).json({ success: false, error: error.message });
+    console.log("📥 Recebido webhook:", req.body);
+    console.log("📤 Resposta do Conversions API:", fbResponse);
+
+    res.status(200).send({ success: true, fbEvent: eventoFacebook, fbResponse });
+  } catch (err) {
+    console.error("Erro ao processar webhook:", err);
+    res.status(500).send({ error: err.message });
   }
 });
 
-// Função para hash SHA256
-function sha256(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
-}
-
-// Inicia servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
