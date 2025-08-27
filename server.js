@@ -1,100 +1,90 @@
 // server.js
-import express from "express";
-import bodyParser from "body-parser";
-import fetch from "node-fetch";
-import crypto from "crypto";
+const express = require('express');
+const fetch = require('node-fetch');
+const crypto = require('crypto');
+const bodyParser = require('body-parser');
 
 const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Configurações do Facebook/Meta
+const DATASET_ID = '568969266119506';
+const ACCESS_TOKEN = 'EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD';
+
+// Parser JSON
 app.use(bodyParser.json());
 
-// ⚙️ Configurações
-const PORT = process.env.PORT || 3000;
-const FB_ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
-const PIXEL_ID = "568969266119506";
-const FB_API_VERSION = "v23.0";
-const FB_API_URL = `https://graph.facebook.com/${FB_API_VERSION}/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
-
-// 🔒 Hash SHA256 exigido pela Meta
-function hashSHA256(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
+// Função para gerar hash SHA256
+function hashSHA256(value) {
+    return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-// 🔤 Normaliza string (minúsculo + remove acento)
-function normalizeString(str) {
-  return str
-    ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    : "";
+// Função para normalizar telefone (remover caracteres não numéricos)
+function normalizePhone(phone) {
+    return phone ? phone.replace(/\D/g, '') : '';
 }
 
-// 🎯 Mapeamento de tags → eventos personalizados
-function mapTagToEventName(tagName) {
-  const normalized = normalizeString(tagName);
-
-  if (normalized === "oportunidade") return "Em análise";
-  if (normalized === "video") return "Qualificado";
-  if (normalized === "vencemos") return "Convertido";
-
-  return "Evento personalizado"; // fallback se não bater
+// Mapear tag do CRM para evento do Facebook
+function mapTagToEvent(tagName) {
+    if (!tagName) return 'Evento personalizado';
+    const normalized = tagName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    switch(normalized) {
+        case 'oportunidade': return 'Em análise';
+        case 'video': return 'Qualificado';
+        case 'vencemos': return 'Convertido';
+        default: return 'Evento personalizado';
+    }
 }
 
-// 🟢 Webhook do Greenn Sales
-app.post("/webhook", async (req, res) => {
-  try {
-    const { lead, tag } = req.body;
+// Receber webhooks
+app.post('/webhook', async (req, res) => {
+    try {
+        const { lead, tag, seller } = req.body;
+        const eventName = mapTagToEvent(tag?.name);
 
-    console.log("📥 Webhook recebido:", JSON.stringify(req.body, null, 2));
+        // Preparar parâmetros de cliente
+        const customerData = {};
+        if (lead?.email) customerData.em = hashSHA256(lead.email.trim().toLowerCase());
+        if (lead?.phone) customerData.ph = hashSHA256(normalizePhone(lead.phone));
+        if (lead?.id) customerData.lead_id = lead.id.toString();
 
-    // ⏱ Tempo do evento
-    const event_time = Math.floor(Date.now() / 1000);
-
-    // Normalização de dados do usuário
-    const email = lead?.email ? lead.email.trim().toLowerCase() : null;
-    const phone = lead?.phone ? lead.phone.replace(/\D/g, "") : null;
-
-    // 🎯 Define o evento Meta com base na TAG
-    const event_name = mapTagToEventName(tag?.name);
-
-    // 📦 Payload da Meta
-    const payload = {
-      data: [
-        {
-          event_name, // agora envia "Em análise", "Qualificado", "Convertido"
-          event_time,
-          action_source: "system_generated",
-          custom_data: {
-            crm: "Greenn Sales",
-            tag: tag?.name || "desconhecida",
-            lead_status: lead?.status || "n/a"
-          },
-          user_data: {
-            em: email ? [hashSHA256(email)] : [],
-            ph: phone ? [hashSHA256(phone)] : [],
-            fn: lead?.name ? [hashSHA256(lead.name.split(" ")[0])] : [],
-            ln: lead?.name ? [hashSHA256(lead.name.split(" ").slice(1).join(" "))] : [],
-            external_id: lead?.id ? [String(lead.id)] : []
-          }
+        if (Object.keys(customerData).length === 0) {
+            console.warn('⚠️ Nenhum parâmetro de cliente válido fornecido para o evento:', eventName);
         }
-      ]
-    };
 
-    // ▶️ Envio para Meta
-    const fbResponse = await fetch(FB_API_URL, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" }
-    });
+        // Payload para API de Conversões
+        const payload = {
+            data: [
+                {
+                    event_name: eventName,
+                    event_time: Math.floor(Date.now() / 1000),
+                    action_source: 'system_generated',
+                    event_source: 'crm',
+                    lead_event_source: 'Greenn Sales',
+                    user_data: customerData
+                }
+            ]
+        };
 
-    const fbResult = await fbResponse.json();
-    console.log(`📤 Evento enviado (${event_name}):`, fbResult);
+        // Enviar para Meta
+        const response = await fetch(`https://graph.facebook.com/v23.0/${DATASET_ID}/events?access_token=${ACCESS_TOKEN}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-    res.status(200).send({ success: true, fbResult });
-  } catch (error) {
-    console.error("❌ Erro no webhook:", error);
-    res.status(500).send({ success: false, error: error.message });
-  }
+        const fbResult = await response.json();
+
+        console.log('📥 Webhook recebido:', JSON.stringify(req.body, null, 2));
+        console.log(`📤 Evento enviado (${eventName}):`, JSON.stringify(fbResult, null, 2));
+
+        res.status(200).send({ success: true, fbResult });
+    } catch (err) {
+        console.error('❌ Erro ao processar webhook:', err);
+        res.status(500).send({ success: false, error: err.message });
+    }
 });
 
-// 🚀 Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`✅ Webhook rodando na porta ${PORT}`);
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
