@@ -1,79 +1,78 @@
-// server.js
-import express from "express";
-import fetch from "node-fetch";
+import express from 'express';
+import fetch from 'node-fetch';
+import crypto from 'crypto';
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// ===== Configurações da Meta =====
+// Meta CAPI
 const PIXEL_ID = "568969266119506";
 const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
 
-// ===== Função auxiliar para mapear tags para eventos =====
-function mapTagToEvent(tagName) {
-  const tag = tagName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // ignora maiúsc/minúsc e acento
-  switch(tag) {
-    case "oportunidade": return "Em análise";
-    case "video": return "Qualificado";
-    case "vencemos": return "Convertido";
-    default: return "Evento personalizado";
-  }
-}
+// Função para hash em SHA256
+const hashSHA256 = (value) => {
+    if (!value) return "";
+    return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+};
 
-// ===== Função para enviar evento à Meta =====
-async function sendToMeta(eventName, lead) {
-  const url = `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
+// Mapear tags do Greenn Sales para nomes de evento Meta
+const mapTagToEventName = (tagName) => {
+    const tag = tagName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if(tag === "oportunidade") return "Em análise";
+    if(tag === "video") return "Qualificado";
+    if(tag === "vencemos") return "Convertido";
+    return "Evento personalizado";
+};
 
-  // Construção do payload mínimo
-  const payload = {
-    data: [
-      {
-        event_name: eventName,
-        event_time: Math.floor(Date.now() / 1000),
-        action_source: "system_generated",
-        event_source: "crm",
-        lead_event_source: "Greenn Sales",
-        user_data: {
-          em: lead.email ? [lead.email.toLowerCase()] : [],
-          ph: lead.phone ? [lead.phone.replace(/\D/g, "")] : [],
-          fn: lead.name ? [lead.name.split(" ")[0].toLowerCase()] : [],
-          ln: lead.name ? [lead.name.split(" ").slice(1).join(" ").toLowerCase()] : []
-        }
-      }
-    ]
-  };
+// Endpoint webhook
+app.post('/webhook', async (req, res) => {
+    const { lead, tag, seller } = req.body;
+    const eventName = mapTagToEventName(tag?.name || "");
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" }
-    });
-    const json = await res.json();
-    console.log(`📤 Evento enviado (${eventName}):`, json);
-  } catch (err) {
-    console.error("❌ Erro ao enviar evento:", err);
-  }
-}
+    // Payload Meta CAPI com hash de dados do cliente
+    const payload = {
+        data: [
+            {
+                event_name: eventName,
+                event_time: Math.floor(Date.now() / 1000),
+                action_source: "system_generated",
+                event_source: "crm",
+                lead_event_source: "Greenn Sales",
+                user_data: {
+                    em: hashSHA256(lead?.email),
+                    ph: hashSHA256(lead?.phone),
+                    fn: hashSHA256(lead?.name),
+                    ln: hashSHA256(lead?.name.split(" ").slice(-1).join(" ")),
+                    ct: hashSHA256(lead?.city || lead?.cidade),
+                    st: hashSHA256(lead?.state || lead?.estado),
+                    zp: hashSHA256(lead?.zip || lead?.cep),
+                    external_id: lead?.id.toString(),
+                }
+            }
+        ]
+    };
 
-// ===== Endpoint de webhook =====
-app.post("/webhook", async (req, res) => {
-  const { lead, tag } = req.body;
-  if (!lead || !tag) {
-    return res.status(400).json({ error: "lead ou tag ausente" });
-  }
-
-  const eventName = mapTagToEvent(tag.name);
-  console.log("📥 Webhook recebido:", req.body);
-
-  await sendToMeta(eventName, lead);
-
-  res.json({ status: "ok" });
+    try {
+        const response = await fetch(`https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        console.log(`📤 Evento enviado (${eventName}):`, data);
+        res.status(200).json({ success: true, fbResult: data });
+    } catch (error) {
+        console.error("❌ Erro ao enviar evento:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
-// ===== Inicia servidor =====
+app.get('/', (req, res) => {
+    res.send("Webhook do Greenn Sales rodando!");
+});
+
 app.listen(PORT, () => {
-  console.log(`✅ Webhook rodando na porta ${PORT}`);
+    console.log(`✅ Webhook rodando na porta ${PORT}`);
 });
