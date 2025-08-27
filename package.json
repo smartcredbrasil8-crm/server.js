@@ -1,7 +1,6 @@
 {
   "name": "greenn-sales-webhook",
   "version": "1.0.0",
-  "description": "Webhook para integrar Greenn Sales com Meta Pixel via CAPI",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -9,6 +8,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.1"
   }
 }
