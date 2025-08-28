@@ -12,6 +12,9 @@ const PORT = process.env.PORT || 10000;
 const PIXEL_ID = "568969266119506";
 const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
 
+// Token de verificação do webhook (crie uma string segura)
+const VERIFY_TOKEN = "845239leirom#";
+
 // Função para hash SHA256 (Meta exige hashing para dados pessoais)
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -33,7 +36,6 @@ function mapTagToStatus(tagName) {
 
 // Função para enviar evento para a API de Conversões do Meta
 async function sendEventToMeta(lead, status) {
-  // Lead ID precisa vir do Facebook Leadgen
   const facebookLeadId = lead.facebookLeadId || lead.leadgen_id;
 
   if (!facebookLeadId) {
@@ -48,7 +50,7 @@ async function sendEventToMeta(lead, status) {
         event_time: Math.floor(Date.now() / 1000),
         action_source: "system_generated",
         user_data: {
-          lead_id: String(facebookLeadId), // <- AQUI está a chave!
+          lead_id: String(facebookLeadId),
           em: lead.email ? hashSHA256(lead.email.toLowerCase()) : undefined,
           ph: lead.phone ? hashSHA256(lead.phone.replace(/\D/g, "")) : undefined,
         },
@@ -76,20 +78,39 @@ async function sendEventToMeta(lead, status) {
   }
 }
 
-// Webhook para receber eventos do Greenn Sales ou Leadgen
+// Endpoint de verificação do webhook (GET)
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode && token === VERIFY_TOKEN) {
+    console.log("Webhook verificado com sucesso!");
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+// Endpoint para receber eventos do Facebook (POST)
 app.post("/webhook", async (req, res) => {
   const body = req.body;
   console.log("📥 Webhook recebido:", JSON.stringify(body, null, 2));
 
-  const lead = body.lead;
-  const tag = body.tag;
-
-  if (!lead || !tag) {
-    return res.status(400).json({ error: "Lead ou Tag ausente" });
+  // Para leadgen, os dados estão em "entry.changes.value"
+  if (body.entry) {
+    body.entry.forEach(async (entry) => {
+      if (entry.changes) {
+        entry.changes.forEach(async (change) => {
+          if (change.field === "leadgen") {
+            const lead = change.value;
+            const status = "Lead"; // ou use mapTagToStatus se tiver tags
+            await sendEventToMeta(lead, status);
+          }
+        });
+      }
+    });
   }
-
-  const status = mapTagToStatus(tag.name);
-  await sendEventToMeta(lead, status);
 
   res.json({ success: true });
 });
