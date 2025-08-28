@@ -9,12 +9,17 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 
 // Configurações do seu Pixel e Token
-const PIXEL_ID = "568969266119506";
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
+const PIXEL_ID = "568969266119506"; // Substitua pelo seu Pixel
+const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD"; // Substitua pelo seu token
 
 // Função para hash SHA256 (Meta exige hashing)
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+// Função para validar lead_id (15 a 17 dígitos)
+function isValidLeadId(leadId) {
+  return /^\d{15,17}$/.test(leadId);
 }
 
 // Mapear tags do Greenn Sales para eventos do CRM
@@ -33,7 +38,6 @@ function mapTagToStatus(tagName) {
 
 // Função para enviar evento para a API de Conversões
 async function sendEventToMeta(lead, status) {
-  // Criar payload
   const payload = {
     data: [
       {
@@ -79,6 +83,12 @@ app.post("/webhook", async (req, res) => {
 
   if (!lead || !tag) {
     return res.status(400).json({ error: "Lead ou Tag ausente" });
+  }
+
+  // ✅ Validar lead_id
+  if (!isValidLeadId(lead.id)) {
+    console.warn("⚠️ Lead_id inválido:", lead.id);
+    return res.status(400).json({ error: "Lead_id inválido" });
   }
 
   const status = mapTagToStatus(tag.name);
