@@ -2,20 +2,26 @@
 import express from "express";
 import fetch from "node-fetch";
 import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Configurações do Pixel e Token (substitua pelos seus valores reais)
-const PIXEL_ID = "568969266119506";
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
+// Configurações do Pixel e Token
+const PIXEL_ID = process.env.PIXEL_ID;
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 
-// Token de verificação do webhook (crie uma string segura)
-const VERIFY_TOKEN = "845239leirom#";
+// Token de verificação do webhook
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "845239leirom#";
 
-// Função para hash SHA256 (Meta exige hashing para dados pessoais)
+// Configuração do Supabase
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Função para hash SHA256
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
@@ -30,7 +36,7 @@ function mapTagToStatus(tagName) {
     case "vencemos":
       return "Convertido";
     default:
-      return "Evento personalizado";
+      return "Lead";
   }
 }
 
@@ -97,19 +103,37 @@ app.post("/webhook", async (req, res) => {
   const body = req.body;
   console.log("📥 Webhook recebido:", JSON.stringify(body, null, 2));
 
-  // Para leadgen, os dados estão em "entry.changes.value"
   if (body.entry) {
-    body.entry.forEach(async (entry) => {
+    for (const entry of body.entry) {
       if (entry.changes) {
-        entry.changes.forEach(async (change) => {
+        for (const change of entry.changes) {
           if (change.field === "leadgen") {
             const lead = change.value;
-            const status = "Lead"; // ou use mapTagToStatus se tiver tags
+            const status = "Lead";
+
+            // 👉 Salvar lead no Supabase
+            const { error } = await supabase.from("leads").insert([
+              {
+                facebook_lead_id: lead.leadgen_id,
+                email: lead.email || null,
+                phone: lead.phone || null,
+                status: status,
+                source: "facebook",
+              },
+            ]);
+
+            if (error) {
+              console.error("❌ Erro ao salvar no Supabase:", error);
+            } else {
+              console.log("✅ Lead salvo no Supabase:", lead.leadgen_id);
+            }
+
+            // 👉 Enviar evento para o Meta
             await sendEventToMeta(lead, status);
           }
-        });
+        }
       }
-    });
+    }
   }
 
   res.json({ success: true });
