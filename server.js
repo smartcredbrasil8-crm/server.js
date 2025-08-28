@@ -17,8 +17,8 @@ const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFM
 const VERIFY_TOKEN = "845239leirom#";
 
 // Configuração do Supabase
-const SUPABASE_URL = "https://YOUR-SUPABASE-URL.supabase.co";
-const SUPABASE_KEY = "YOUR-SUPABASE-ANON-KEY";
+const SUPABASE_URL = "https://xppedcvaylcimqkdmooo.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGVkY3ZheWxjaW1xa2Rtb29vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0MTk0MjYsImV4cCI6MjA3MTk5NTQyNn0.NkkDk8AaWs15e6rPCFqdixfS8BEBG4czHCZVyc09T1A";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // Função hash SHA256
