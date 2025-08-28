@@ -8,21 +8,16 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Configurações do seu Pixel e Token
-const PIXEL_ID = "568969266119506"; // Substitua pelo seu Pixel
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD"; // Substitua pelo seu token
+// Configurações do Pixel e Token (substitua pelos seus valores reais)
+const PIXEL_ID = "568969266119506";
+const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
 
-// Função para hash SHA256 (Meta exige hashing)
+// Função para hash SHA256 (Meta exige hashing para dados pessoais)
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-// Função para validar lead_id (15 a 17 dígitos)
-function isValidLeadId(leadId) {
-  return /^\d{15,17}$/.test(leadId);
-}
-
-// Mapear tags do Greenn Sales para eventos do CRM
+// Mapeamento de tags para status
 function mapTagToStatus(tagName) {
   switch (tagName.toLowerCase()) {
     case "oportunidade":
@@ -36,8 +31,16 @@ function mapTagToStatus(tagName) {
   }
 }
 
-// Função para enviar evento para a API de Conversões
+// Função para enviar evento para a API de Conversões do Meta
 async function sendEventToMeta(lead, status) {
+  // Lead ID precisa vir do Facebook Leadgen
+  const facebookLeadId = lead.facebookLeadId || lead.leadgen_id;
+
+  if (!facebookLeadId) {
+    console.error("❌ Lead sem lead_id do Facebook. Evento não enviado.");
+    return;
+  }
+
   const payload = {
     data: [
       {
@@ -45,7 +48,7 @@ async function sendEventToMeta(lead, status) {
         event_time: Math.floor(Date.now() / 1000),
         action_source: "system_generated",
         user_data: {
-          lead_id: String(lead.id),
+          lead_id: String(facebookLeadId), // <- AQUI está a chave!
           em: lead.email ? hashSHA256(lead.email.toLowerCase()) : undefined,
           ph: lead.phone ? hashSHA256(lead.phone.replace(/\D/g, "")) : undefined,
         },
@@ -73,7 +76,7 @@ async function sendEventToMeta(lead, status) {
   }
 }
 
-// Rota webhook para receber eventos do Greenn Sales
+// Webhook para receber eventos do Greenn Sales ou Leadgen
 app.post("/webhook", async (req, res) => {
   const body = req.body;
   console.log("📥 Webhook recebido:", JSON.stringify(body, null, 2));
@@ -83,12 +86,6 @@ app.post("/webhook", async (req, res) => {
 
   if (!lead || !tag) {
     return res.status(400).json({ error: "Lead ou Tag ausente" });
-  }
-
-  // ✅ Validar lead_id
-  if (!isValidLeadId(lead.id)) {
-    console.warn("⚠️ Lead_id inválido:", lead.id);
-    return res.status(400).json({ error: "Lead_id inválido" });
   }
 
   const status = mapTagToStatus(tag.name);
