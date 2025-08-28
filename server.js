@@ -9,19 +9,19 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Configurações do Pixel e Token
-const PIXEL_ID = process.env.PIXEL_ID;
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+// Configurações do Pixel e Token do Facebook
+const PIXEL_ID = "568969266119506"; // substitua pelo seu Pixel
+const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
 
 // Token de verificação do webhook
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "845239leirom#";
+const VERIFY_TOKEN = "845239leirom#";
 
 // Configuração do Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const SUPABASE_URL = "https://YOUR-SUPABASE-URL.supabase.co";
+const SUPABASE_KEY = "YOUR-SUPABASE-ANON-KEY";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Função para hash SHA256
+// Função hash SHA256
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
@@ -36,11 +36,11 @@ function mapTagToStatus(tagName) {
     case "vencemos":
       return "Convertido";
     default:
-      return "Lead";
+      return "Evento personalizado";
   }
 }
 
-// Função para enviar evento para a API de Conversões do Meta
+// Envio de evento para Meta
 async function sendEventToMeta(lead, status) {
   const facebookLeadId = lead.facebookLeadId || lead.leadgen_id;
 
@@ -60,9 +60,7 @@ async function sendEventToMeta(lead, status) {
           em: lead.email ? hashSHA256(lead.email.toLowerCase()) : undefined,
           ph: lead.phone ? hashSHA256(lead.phone.replace(/\D/g, "")) : undefined,
         },
-        custom_data: {
-          lead_status: status,
-        },
+        custom_data: { lead_status: status },
       },
     ],
   };
@@ -84,7 +82,7 @@ async function sendEventToMeta(lead, status) {
   }
 }
 
-// Endpoint de verificação do webhook (GET)
+// Verificação do webhook do Facebook
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -98,11 +96,12 @@ app.get("/webhook", (req, res) => {
   }
 });
 
-// Endpoint para receber eventos do Facebook (POST)
+// Receber eventos do Facebook Leadgen ou CRM
 app.post("/webhook", async (req, res) => {
   const body = req.body;
   console.log("📥 Webhook recebido:", JSON.stringify(body, null, 2));
 
+  // Processa os leads
   if (body.entry) {
     for (const entry of body.entry) {
       if (entry.changes) {
@@ -111,24 +110,19 @@ app.post("/webhook", async (req, res) => {
             const lead = change.value;
             const status = "Lead";
 
-            // 👉 Salvar lead no Supabase
-            const { error } = await supabase.from("leads").insert([
-              {
-                facebook_lead_id: lead.leadgen_id,
-                email: lead.email || null,
-                phone: lead.phone || null,
-                status: status,
-                source: "facebook",
-              },
-            ]);
-
-            if (error) {
-              console.error("❌ Erro ao salvar no Supabase:", error);
-            } else {
-              console.log("✅ Lead salvo no Supabase:", lead.leadgen_id);
+            // Salvar mapping FacebookID <-> CRM ID no Supabase
+            if (lead.facebookLeadId && lead.id) {
+              const { data, error } = await supabase
+                .from("lead_mapping")
+                .upsert({
+                  facebook_lead_id: lead.facebookLeadId,
+                  crm_lead_id: lead.id,
+                  email: lead.email || null,
+                  phone: lead.phone || null,
+                });
+              if (error) console.error("❌ Erro Supabase:", error);
             }
 
-            // 👉 Enviar evento para o Meta
             await sendEventToMeta(lead, status);
           }
         }
