@@ -9,26 +9,32 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Configurações do Pixel e Token do Facebook
-const PIXEL_ID = "568969266119506"; // substitua pelo seu Pixel
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPcsqtNZBWz4ae0GmoZAqRpmC3U2zdAlmpNTQR3yn9fFMr1vhuzZAQMlhE0vJ7eZBXfZAnFEVlxo57vhxEm9axplSs4zwUpV4EuOXcpYnefhuD0Wy44p9sZCFyxGLd61NM2sZBQGAZBRJXETR29Q3pqxGPZBLccMZAKFEhEZBZAbYMZB95QVcEqt5O7H33jQZDZD";
+// ===============================
+// CONFIGURAÇÕES
+// ===============================
 
-// Token de verificação do webhook
-const VERIFY_TOKEN = "845239leirom#";
+// Substitua pelos seus valores reais
+const PIXEL_ID = "SEU_PIXEL_ID_AQUI";
+const ACCESS_TOKEN = "SEU_ACCESS_TOKEN_AQUI";
+const VERIFY_TOKEN = "SUA_STRING_VERIFICACAO_AQUI";
 
-// Configuração do Supabase
-const SUPABASE_URL = "https://xppedcvaylcimqkdmooo.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGVkY3ZheWxjaW1xa2Rtb29vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0MTk0MjYsImV4cCI6MjA3MTk5NTQyNn0.NkkDk8AaWs15e6rPCFqdixfS8BEBG4czHCZVyc09T1A";
+// Supabase
+const SUPABASE_URL = "https://SEU_PROJECT_ID.supabase.co";
+const SUPABASE_KEY = "SEU_ANON_KEY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Função hash SHA256
+// ===============================
+// FUNÇÕES AUXILIARES
+// ===============================
+
+// Hash SHA256 exigido pelo Meta para dados pessoais
 function hashSHA256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-// Mapeamento de tags para status
+// Mapeia tags do CRM para status
 function mapTagToStatus(tagName) {
-  switch (tagName.toLowerCase()) {
+  switch ((tagName || "").toLowerCase()) {
     case "oportunidade":
       return "Em análise";
     case "video":
@@ -36,11 +42,11 @@ function mapTagToStatus(tagName) {
     case "vencemos":
       return "Convertido";
     default:
-      return "Evento personalizado";
+      return "Lead";
   }
 }
 
-// Envio de evento para Meta
+// Envia evento para o Meta Pixel
 async function sendEventToMeta(lead, status) {
   const facebookLeadId = lead.facebookLeadId || lead.leadgen_id;
 
@@ -60,7 +66,9 @@ async function sendEventToMeta(lead, status) {
           em: lead.email ? hashSHA256(lead.email.toLowerCase()) : undefined,
           ph: lead.phone ? hashSHA256(lead.phone.replace(/\D/g, "")) : undefined,
         },
-        custom_data: { lead_status: status },
+        custom_data: {
+          lead_status: status,
+        },
       },
     ],
   };
@@ -74,7 +82,6 @@ async function sendEventToMeta(lead, status) {
         headers: { "Content-Type": "application/json" },
       }
     );
-
     const json = await res.json();
     console.log(`📤 Evento enviado (${status}):`, JSON.stringify(json, null, 2));
   } catch (error) {
@@ -82,57 +89,97 @@ async function sendEventToMeta(lead, status) {
   }
 }
 
+// Salva ou atualiza lead no Supabase
+async function upsertLead(facebookLeadId, crmLeadId, email, phone, status) {
+  const { data, error } = await supabase
+    .from("leads")
+    .upsert(
+      {
+        facebook_lead_id: facebookLeadId,
+        crm_lead_id: crmLeadId,
+        email,
+        phone,
+        status,
+      },
+      { onConflict: ["facebook_lead_id"] }
+    );
+  if (error) console.error("❌ Erro no Supabase:", error);
+  else console.log("💾 Lead salvo no Supabase:", data);
+}
+
+// ===============================
+// ENDPOINTS
+// ===============================
+
 // Verificação do webhook do Facebook
-app.get("/webhook", (req, res) => {
+app.get("/webhook/facebook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode && token === VERIFY_TOKEN) {
-    console.log("Webhook verificado com sucesso!");
+    console.log("Webhook do Facebook verificado!");
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
   }
 });
 
-// Receber eventos do Facebook Leadgen ou CRM
-app.post("/webhook", async (req, res) => {
+// Recebe leads do Facebook
+app.post("/webhook/facebook", async (req, res) => {
   const body = req.body;
-  console.log("📥 Webhook recebido:", JSON.stringify(body, null, 2));
+  console.log("📥 Webhook do Facebook recebido:", JSON.stringify(body, null, 2));
 
-  // Processa os leads
   if (body.entry) {
-    for (const entry of body.entry) {
+    body.entry.forEach(async (entry) => {
       if (entry.changes) {
-        for (const change of entry.changes) {
+        entry.changes.forEach(async (change) => {
           if (change.field === "leadgen") {
             const lead = change.value;
-            const status = "Lead";
-
-            // Salvar mapping FacebookID <-> CRM ID no Supabase
-            if (lead.facebookLeadId && lead.id) {
-              const { data, error } = await supabase
-                .from("lead_mapping")
-                .upsert({
-                  facebook_lead_id: lead.facebookLeadId,
-                  crm_lead_id: lead.id,
-                  email: lead.email || null,
-                  phone: lead.phone || null,
-                });
-              if (error) console.error("❌ Erro Supabase:", error);
-            }
-
+            const status = "Lead"; // padrão do Facebook
             await sendEventToMeta(lead, status);
+            await upsertLead(
+              lead.leadgen_id,
+              null,
+              lead.email,
+              lead.phone,
+              status
+            );
           }
-        }
+        });
       }
-    }
+    });
   }
 
   res.json({ success: true });
 });
 
+// Recebe updates do CRM
+app.post("/webhook/crm", async (req, res) => {
+  const body = req.body;
+  console.log("📥 Webhook do CRM recebido:", JSON.stringify(body, null, 2));
+
+  // Supondo que o CRM envia facebookLeadId e crmLeadId
+  const lead = body.lead;
+  const status = mapTagToStatus(body.status);
+
+  if (lead) {
+    await sendEventToMeta(lead, status);
+    await upsertLead(
+      lead.facebookLeadId,
+      lead.crmLeadId,
+      lead.email,
+      lead.phone,
+      status
+    );
+  }
+
+  res.json({ success: true });
+});
+
+// ===============================
+// INICIAR SERVIDOR
+// ===============================
 app.listen(PORT, () => {
   console.log(`✅ Webhook rodando na porta ${PORT}`);
 });
