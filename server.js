@@ -148,6 +148,11 @@ app.post("/webhook/crm", async (req, res) => {
   res.json({ success: true });
 });
 
+// 🔥 Nova rota de health check
+app.get("/health", (req, res) => {
+  res.status(200).send("✅ API online e funcionando!");
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Webhook rodando na porta ${PORT}`);
 });
