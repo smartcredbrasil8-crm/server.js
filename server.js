@@ -14,7 +14,15 @@ const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
 // Google Sheets
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n");
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
+  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
+  : null;
+
+if (!GOOGLE_PRIVATE_KEY) {
+  console.error("GOOGLE_PRIVATE_KEY não definida!");
+  process.exit(1);
+}
+
 // Inicializa Google Sheets API
 const auth = new google.auth.JWT(
   GOOGLE_CLIENT_EMAIL,
