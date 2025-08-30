@@ -1,19 +1,32 @@
 import express from "express";
 import fetch from "node-fetch";
+import fs from "fs";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 
 const app = express();
 app.use(express.json());
 
-// Variáveis de ambiente
+// Variáveis de ambiente Render
 const PORT = process.env.PORT || 10000;
 const PIXEL_ID = process.env.PIXEL_ID;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
-  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
-  : undefined;
+
+// Caminho do arquivo secreto no Render
+const GOOGLE_CREDENTIALS_PATH = "/run/secrets/google-credentials.json";
+
+// Ler arquivo secreto do Google
+let googleCredentials;
+try {
+  const content = fs.readFileSync(GOOGLE_CREDENTIALS_PATH, "utf8");
+  googleCredentials = JSON.parse(content);
+} catch (err) {
+  console.error("❌ Não foi possível ler o arquivo secreto do Google:", err);
+}
+
+// Atribuir variáveis do Google
+const GOOGLE_CLIENT_EMAIL = googleCredentials?.client_email;
+const GOOGLE_PRIVATE_KEY = googleCredentials?.private_key?.replace(/\\n/g, "\n");
+const SPREADSHEET_ID = googleCredentials?.spreadsheet_id;
 
 // Debug: verificar se as variáveis estão carregadas
 console.log("PIXEL_ID:", PIXEL_ID ? "OK" : "❌ NÃO CARREGADO");
@@ -23,11 +36,11 @@ console.log("GOOGLE_CLIENT_EMAIL:", GOOGLE_CLIENT_EMAIL ? "OK" : "❌ NÃO CARRE
 console.log("GOOGLE_PRIVATE_KEY:", GOOGLE_PRIVATE_KEY ? "OK" : "❌ NÃO CARREGADO");
 
 // Validar variáveis essenciais antes de continuar
-if (!PIXEL_ID) throw new Error("❌ PIXEL_ID não definida!");
+if (!PIXEL_ID) throw new Error("❌ PIXEL_ID não definido!");
 if (!ACCESS_TOKEN) throw new Error("❌ ACCESS_TOKEN não definido!");
 if (!SPREADSHEET_ID) throw new Error("❌ SPREADSHEET_ID não definido!");
-if (!GOOGLE_CLIENT_EMAIL) throw new Error("❌ GOOGLE_CLIENT_EMAIL não definida!");
-if (!GOOGLE_PRIVATE_KEY) throw new Error("❌ GOOGLE_PRIVATE_KEY não encontrada!");
+if (!GOOGLE_CLIENT_EMAIL) throw new Error("❌ GOOGLE_CLIENT_EMAIL não definido!");
+if (!GOOGLE_PRIVATE_KEY) throw new Error("❌ GOOGLE_PRIVATE_KEY não encontrado!");
 
 // Inicializando Google Sheets
 const doc = new GoogleSpreadsheet(SPREADSHEET_ID);
