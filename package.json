@@ -1,15 +1,19 @@
 {
-  "name": "crm-facebook-integration",
+  "name": "crm-facebook-webhook",
   "version": "1.0.0",
-  "main": "server.js",
+  "description": "Webhook para integração CRM + Google Sheets + Facebook Pixel",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "body-parser": "^1.20.2",
-    "node-fetch": "^3.3.2",
-    "googleapis": "^133.0.0"
+    "googleapis": "^121.0.0",
+    "node-fetch": "^3.4.1"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
