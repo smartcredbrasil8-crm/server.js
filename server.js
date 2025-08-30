@@ -10,15 +10,11 @@ const PORT = process.env.PORT || 10000;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const PIXEL_ID = process.env.PIXEL_ID;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
-  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
-  : null;
+import credentials from "./config/google-credentials.json" assert { type: "json" };
 
-if (!GOOGLE_PRIVATE_KEY) {
-  console.error("GOOGLE_PRIVATE_KEY não definida!");
-  process.exit(1);
-}
+const GOOGLE_PRIVATE_KEY = credentials.private_key;
+const GOOGLE_CLIENT_EMAIL = credentials.client_email;
+
 
 // Middleware
 app.use(bodyParser.json());
