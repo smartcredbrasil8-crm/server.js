@@ -1,158 +1,121 @@
-// server.js
 import express from "express";
+import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
+import { google } from "googleapis";
 
 const app = express();
-app.use(express.json());
+app.use(bodyParser.json());
 
-const PORT = process.env.PORT || 10000;
+// 🔑 Variáveis de ambiente
+const PIXEL_ID = process.env.PIXEL_ID;
+const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
 
-// Configurações do Pixel e Token
-const PIXEL_ID = "568969266119506";
-const ACCESS_TOKEN = "EAADU2T8mQZAUBPRbatdIN038ucTUcp7O8tENhNCZBvX5LCGBzpcawiN7ZAiTG75X9o5cbJP8Kc2BZAoo3FEJGtZAzCEuXNxPpWEoYxGnbfuBleZAnfthkWmMENBRsB5u2rD2DBB7Q36t2tSRhec8tZA2IKt5h2EzSonvy6oClmbVH6lGaVRsB7xcdUkpsZCLv8ZCw3AZDZD";
+// Google Sheets
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n");
 
-// Token de verificação do webhook (string segura)
-const VERIFY_TOKEN = "845239leirom#";
+// Inicializa Google Sheets API
+const auth = new google.auth.JWT(
+  GOOGLE_CLIENT_EMAIL,
+  null,
+  GOOGLE_PRIVATE_KEY,
+  ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+);
+const sheets = google.sheets({ version: "v4", auth });
 
-// Configuração do Supabase
-const SUPABASE_URL = "https://xppedcvaylcimqkdmooo.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcGVkY3ZheWxjaW1xa2Rtb29vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0MTk0MjYsImV4cCI6MjA3MTk5NTQyNn0.NkkDk8AaWs15e6rPCFqdixfS8BEBG4czHCZVyc09T1A";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// Função para hash SHA256
-function hashSHA256(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
+// Hash para email/telefone (Facebook exige)
+function hash(data) {
+  return crypto.createHash("sha256").update(data.trim().toLowerCase()).digest("hex");
 }
 
-// Mapeamento de tags do CRM para status/eventos
-function mapCrmTagToStatus(tag) {
-  switch (tag) {
-    case "Oportunidade":
-      return "Em análise";
-    case "vídeo":
-      return "Qualificado";
-    case "Vencemos":
-      return "Convertido";
-    default:
-      return "Lead";
-  }
-}
-
-// Envia evento para o Meta Pixel
-async function sendEventToMeta(lead, status) {
-  const facebookLeadId = lead.facebookLeadId || lead.leadgen_id;
-  if (!facebookLeadId) {
-    console.error("❌ Lead sem lead_id do Facebook. Evento não enviado.");
-    return;
-  }
-
-  const payload = {
-    data: [
-      {
-        event_name: status,
-        event_time: Math.floor(Date.now() / 1000),
-        action_source: "system_generated",
-        user_data: {
-          lead_id: String(facebookLeadId),
-          em: lead.email ? hashSHA256(lead.email.toLowerCase()) : undefined,
-          ph: lead.phone ? hashSHA256(lead.phone.replace(/\D/g, "")) : undefined,
-        },
-        custom_data: {
-          lead_status: status,
-        },
-      },
-    ],
-  };
-
+// Buscar Lead no Google Sheets
+async function buscarLeadNaPlanilha(email, phone) {
   try {
-    const res = await fetch(
-      `https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
+    const range = "Leads!A:D"; // Ajuste para a aba/colunas certas
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range,
+    });
+
+    const rows = res.data.values;
+    if (!rows || rows.length === 0) return null;
+
+    // Supondo colunas: [LeadID_FB, Email, Telefone, CRM_ID]
+    for (let row of rows) {
+      const [leadIdFB, emailPlanilha, telefonePlanilha] = row;
+
+      if (
+        (email && emailPlanilha && emailPlanilha.toLowerCase() === email.toLowerCase()) ||
+        (phone && telefonePlanilha && telefonePlanilha === phone)
+      ) {
+        return leadIdFB;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error("Erro ao buscar lead na planilha:", err);
+    return null;
+  }
+}
+
+// Webhook CRM → Facebook
+app.post("/webhook", async (req, res) => {
+  try {
+    const { lead_id_crm, email, phone, status } = req.body;
+
+    console.log("📥 Webhook recebido:", req.body);
+
+    // Buscar LeadID_FB pela planilha
+    const fb_lead_id = await buscarLeadNaPlanilha(email, phone);
+
+    // Mapear status do CRM para eventos
+    let eventName = "Lead";
+    if (status === "Oportunidade") eventName = "Em análise";
+    else if (status === "Vídeo") eventName = "Qualificado";
+    else if (status === "Vencemos") eventName = "Convertido";
+
+    // Evento pronto
+    const event = {
+      data: [
+        {
+          event_name: eventName,
+          event_time: Math.floor(Date.now() / 1000),
+          user_data: {
+            em: email ? [hash(email)] : [],
+            ph: phone ? [hash(phone)] : [],
+          },
+          custom_data: { crm_id: lead_id_crm },
+          event_source_url: "https://seusite.com",
+          action_source: "crm",
+          event_id: fb_lead_id || lead_id_crm,
+        },
+      ],
+    };
+
+    console.log("📤 Enviando evento:", event);
+
+    // Chamada API do Facebook
+    const response = await fetch(
+      `https://graph.facebook.com/v17.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`,
       {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(event),
         headers: { "Content-Type": "application/json" },
       }
     );
-    const json = await res.json();
-    console.log(`📤 Evento enviado (${status}):`, JSON.stringify(json, null, 2));
-  } catch (error) {
-    console.error("❌ Erro ao enviar evento:", error);
-  }
-}
 
-// Salva ou atualiza lead no Supabase
-async function upsertLead(facebookLeadId, crmLeadId, email, phone, status) {
-  const { data, error } = await supabase
-    .from("leads")
-    .upsert(
-      {
-        facebook_lead_id: facebookLeadId,
-        crm_lead_id: crmLeadId,
-        email,
-        phone,
-        status,
-      },
-      { onConflict: ["facebook_lead_id"] }
-    );
-  if (error) console.error("❌ Erro no Supabase:", error);
-  else console.log("💾 Lead salvo no Supabase:", data);
-}
+    const data = await response.json();
+    console.log("✅ Resposta Facebook:", data);
 
-// Endpoint de verificação do webhook (GET)
-app.get("/webhook/facebook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode && token === VERIFY_TOKEN) {
-    console.log("Webhook do Facebook verificado!");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("❌ Erro no webhook:", err);
+    res.sendStatus(500);
   }
 });
 
-// Webhook do Facebook (POST)
-app.post("/webhook/facebook", async (req, res) => {
-  const body = req.body;
-  console.log("📥 Webhook do Facebook recebido:", JSON.stringify(body, null, 2));
-
-  if (body.entry) {
-    for (const entry of body.entry) {
-      for (const change of entry.changes) {
-        if (change.field === "leadgen") {
-          const lead = change.value;
-          const status = mapCrmTagToStatus("Oportunidade"); // Sempre "Em análise"
-          await sendEventToMeta(lead, status);
-          await upsertLead(lead.leadgen_id, null, lead.email, lead.phone, status);
-        }
-      }
-    }
-  }
-  res.json({ success: true });
-});
-
-// Webhook do CRM (POST)
-app.post("/webhook/crm", async (req, res) => {
-  const lead = req.body.lead;
-  const tag = req.body.tag; // Tag do CRM: "Oportunidade", "vídeo", "Vencemos"
-  const status = mapCrmTagToStatus(tag);
-
-  if (lead) {
-    await sendEventToMeta(lead, status);
-    await upsertLead(lead.facebookLeadId, lead.crmLeadId, lead.email, lead.phone, status);
-  }
-
-  res.json({ success: true });
-});
-
-// 🔥 Nova rota de health check
-app.get("/health", (req, res) => {
-  res.status(200).send("✅ API online e funcionando!");
-});
-
-app.listen(PORT, () => {
-  console.log(`✅ Webhook rodando na porta ${PORT}`);
-});
+// Start
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
