@@ -10,7 +10,11 @@ const PORT = process.env.PORT || 10000;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const PIXEL_ID = process.env.PIXEL_ID;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-import credentials from "./config/google-credentials.json" assert { type: "json" };
+import fs from "fs";
+
+const credentials = JSON.parse(
+  fs.readFileSync("./config/google-credentials.json", "utf-8")
+);
 
 const GOOGLE_PRIVATE_KEY = credentials.private_key;
 const GOOGLE_CLIENT_EMAIL = credentials.client_email;
