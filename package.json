@@ -1,19 +1,17 @@
 {
-  "name": "crm-facebook-webhook",
+  "name": "smartcred-webhook",
   "version": "1.0.0",
-  "description": "Webhook para integração CRM + Google Sheets + Facebook Pixel",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "dependencies": {
-  "node-fetch": "3.3.2",
-    "body-parser": "^1.20.2",
-    "googleapis": "^121.0.0",
-    "node-fetch": "^3.4.1"
-  },
   "engines": {
-    "node": "22.x"
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "google-spreadsheet": "^4.1.1",
+    "node-fetch": "3.3.2"
   }
 }
