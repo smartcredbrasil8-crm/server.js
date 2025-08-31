@@ -1,28 +1,30 @@
 app = "smartcred-webhook"
 
+# Build usando o builder oficial NodeJS do Fly
 [build]
-  # Builder otimizado para Node.js
-  builder = "fly/builders:nodejs"
+  image = "node:18-bullseye"  # imagem oficial Node 18
 
+# Variáveis de ambiente default (pode sobrescrever via Fly UI)
 [env]
   PORT = "8080"
-  # As variáveis do Google devem ser configuradas como secrets do Fly
-  # Não coloque aqui valores sensíveis diretamente
-  # GOOGLE_CLIENT_EMAIL = "seu_email"
-  # GOOGLE_PRIVATE_KEY = "sua_chave"
-  # SPREADSHEET_ID = "id_da_planilha"
-  PIXEL_ID = "sua_pixel_id_aqui"
-  ACCESS_TOKEN = "seu_access_token_aqui"
 
+# Serviços
 [[services]]
   internal_port = 8080
-  processes = ["app"]
   protocol = "tcp"
 
   [[services.ports]]
-    handlers = ["http"]
     port = 80
+    handlers = ["http"]
 
   [[services.ports]]
-    handlers = ["tls", "http"]
     port = 443
+    handlers = ["tls", "http"]
+
+# Health check opcional
+  [services.checks]
+    type = "http"
+    path = "/"
+    interval = 10000
+    timeout = 2000
+    grace_period = 10000
