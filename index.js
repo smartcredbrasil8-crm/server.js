@@ -53,7 +53,53 @@ const initializeDatabase = async () => {
 
 initializeDatabase();
 
-// NOVO ENDPOINT: Para importar leads para o banco de dados
+// NOVO ENDPOINT: Rota para exibir o formulário de importação
+app.get('/importar', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Importar Leads</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+                textarea { width: 600px; height: 300px; margin-top: 20px; font-family: monospace; }
+                button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+                h1 { color: #333; }
+                p { color: #666; }
+            </style>
+        </head>
+        <body>
+            <h1>Importar Leads para o Banco de Dados</h1>
+            <p>Cole seus dados JSON aqui e clique em Importar.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "crm_id": "ID_CRM", "email": "email@exemplo.com", "phone": "+5511987654321"}]'></textarea><br>
+            <button onclick="importLeads()">Importar Leads</button>
+            <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
+
+            <script>
+                async function importLeads() {
+                    const data = document.getElementById('leads-data').value;
+                    const statusMessage = document.getElementById('status-message');
+                    try {
+                        const response = await fetch('/import-leads', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: data
+                        });
+                        const result = await response.text();
+                        statusMessage.textContent = result;
+                        statusMessage.style.color = 'green';
+                    } catch (error) {
+                        statusMessage.textContent = 'Erro na importação: ' + error.message;
+                        statusMessage.style.color = 'red';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// ENDPOINT: Onde o formulário de importação envia os dados
 app.post('/import-leads', async (req, res) => {
     const leadsToImport = req.body;
     if (!Array.isArray(leadsToImport) || leadsToImport.length === 0) {
@@ -86,7 +132,7 @@ app.post('/webhook', async (req, res) => {
     try {
         const leadData = req.body;
         const crmEventName = leadData.tag ? leadData.tag.name : null;
-        
+
         if (!crmEventName) {
             console.log('Webhook recebido, mas sem nome de evento válido. Nenhuma ação será tomada.');
             return res.status(200).send('Webhook recebido, mas sem nome de evento.');
@@ -99,7 +145,7 @@ app.post('/webhook', async (req, res) => {
         }
 
         const crmId = leadData.lead.id;
-        
+
         // Busca o ID do Facebook no banco de dados usando o ID do CRM
         const result = await client.query(
             'SELECT facebook_lead_id, email, phone FROM leads WHERE crm_id = $1',
@@ -114,10 +160,10 @@ app.post('/webhook', async (req, res) => {
         const facebookLeadId = result.rows[0].facebook_lead_id;
         const leadEmail = result.rows[0].email;
         const leadPhone = result.rows[0].phone;
-        
+
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-        
+
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
@@ -132,7 +178,7 @@ app.post('/webhook', async (req, res) => {
         };
 
         const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
-        
+
         await axios.post(facebookAPIUrl, {
             data: [eventData]
         });
