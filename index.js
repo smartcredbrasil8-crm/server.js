@@ -31,7 +31,7 @@ app.post('/webhook', async (req, res) => {
         // Pega os dados enviados pelo webhook do CRM
         const leadData = req.body;
         
-        // CORREÇÃO: Usa os nomes dos campos que vieram no teste real
+        // Usa os nomes dos campos que vieram no teste real
         const crmEventName = leadData.tag ? leadData.tag.name : null;
         
         if (!crmEventName) {
@@ -47,11 +47,10 @@ app.post('/webhook', async (req, res) => {
 
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-        const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+        const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
         const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
         const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-        // Pega o e-mail e o telefone do lead usando os nomes de campos corretos
         const emailCRM = leadData.lead.email ? leadData.lead.email.toLowerCase() : null;
         const phoneCRM = leadData.lead.phone ? leadData.lead.phone.replace(/\D/g, '') : null;
 
@@ -67,8 +66,8 @@ app.post('/webhook', async (req, res) => {
         );
         const sheets = google.sheets({ version: 'v4', auth });
 
-        // CORREÇÃO FINAL: A linha agora lê o intervalo correto de colunas
-        const range = 'Lead geral!A:Q';
+        // O código agora lê o intervalo simplificado de colunas A, B e C
+        const range = 'Lead geral!A:C';
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range,
@@ -79,10 +78,10 @@ app.post('/webhook', async (req, res) => {
 
         if (rows.length) {
             rows.forEach(row => {
-                // CORREÇÃO FINAL: Os índices agora correspondem às colunas A (0), P (15) e Q (16)
+                // A ordem dos índices agora corresponde à nova ordem das colunas
                 const sheetLeadId = row[0]; // Coluna A
-                const sheetPhone = row[15] ? row[15].replace(/\D/g, '') : null; // Coluna P
-                const sheetEmail = row[16] ? row[16].toLowerCase() : null; // Coluna Q
+                const sheetPhone = row[1] ? row[1].replace(/\D/g, '') : null; // Coluna B
+                const sheetEmail = row[2] ? row[2].toLowerCase() : null; // Coluna C
 
                 if (sheetEmail && emailCRM && sheetEmail === emailCRM) {
                     facebookLeadId = sheetLeadId;
