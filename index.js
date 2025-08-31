@@ -114,16 +114,13 @@ app.post('/webhook', async (req, res) => {
         const facebookLeadId = result.rows[0].facebook_lead_id;
         const leadEmail = result.rows[0].email;
         const leadPhone = result.rows[0].phone;
-
+        
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
         
-        const emailHashed = leadEmail ? crypto.createHash('sha256').update(leadEmail).digest('hex') : null;
-        const phoneHashed = leadPhone ? crypto.createHash('sha256').update(leadPhone).digest('hex') : null;
-
         const userData = {};
-        if (emailHashed) userData.em = [emailHashed];
-        if (phoneHashed) userData.ph = [phoneHashed];
+        if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
+        if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
 
         const eventData = {
             event_name: facebookEventName,
