@@ -1,30 +1,22 @@
+# fly.toml otimizado para NodeJS
 app = "smartcred-webhook"
 
-# Build usando o builder oficial NodeJS do Fly
+# NodeJS puro, usando comando start do package.json
 [build]
-  image = "node:18-bullseye"  # imagem oficial Node 18
+  image = "node:18-bullseye"  # imagem oficial NodeJS
 
-# Variáveis de ambiente default (pode sobrescrever via Fly UI)
 [env]
   PORT = "8080"
 
-# Serviços
 [[services]]
   internal_port = 8080
   protocol = "tcp"
+  processes = ["app"]
 
   [[services.ports]]
-    port = 80
     handlers = ["http"]
+    port = 80
 
   [[services.ports]]
-    port = 443
     handlers = ["tls", "http"]
-
-# Health check opcional
-  [services.checks]
-    type = "http"
-    path = "/"
-    interval = 10000
-    timeout = 2000
-    grace_period = 10000
+    port = 443
