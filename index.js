@@ -30,13 +30,15 @@ app.post('/webhook', async (req, res) => {
     try {
         // Pega os dados enviados pelo webhook do CRM
         const leadData = req.body;
-        const crmEventName = leadData.stage_name; // Supondo que o nome do evento/estágio esteja em 'stage_name'
+        
+        // CORREÇÃO: O nome do evento está em 'marcação.nome', não 'stage_name'
+        const crmEventName = leadData.marcação.nome; 
         
         // Mapeia o evento do CRM para o evento do Facebook
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
 
         // Se o webhook não tiver os dados necessários, retorna um erro
-        if (!leadData || !leadData.contact) {
+        if (!leadData || !leadData.liderar) {
             return res.status(400).send('Dados do lead ausentes no webhook.');
         }
 
@@ -47,9 +49,9 @@ app.post('/webhook', async (req, res) => {
         const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
         const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-        // Pega o e-mail e o telefone do lead, se existirem
-        const emailCRM = leadData.contact.email ? leadData.contact.email.toLowerCase() : null;
-        const phoneCRM = leadData.contact.phone_number ? leadData.contact.phone_number.replace(/\D/g, '') : null;
+        // Pega o e-mail e o telefone do lead
+        const emailCRM = leadData.liderar.e-mail ? leadData.liderar.e-mail.toLowerCase() : null;
+        const phoneCRM = leadData.liderar.telefone ? leadData.liderar.telefone.replace(/\D/g, '') : null;
 
         if (!emailCRM && !phoneCRM) {
             return res.status(400).send('E-mail ou telefone do lead ausentes.');
