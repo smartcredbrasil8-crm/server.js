@@ -66,8 +66,8 @@ app.post('/webhook', async (req, res) => {
         );
         const sheets = google.sheets({ version: 'v4', auth });
 
-        // O código agora lê o intervalo simplificado de colunas A, B e C
-        const range = 'Lead geral!A:C';
+        // O código agora lê a nova aba 'Sheet1' e o intervalo A, B e C
+        const range = 'Sheet1!A:C';
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range,
@@ -78,10 +78,9 @@ app.post('/webhook', async (req, res) => {
 
         if (rows.length) {
             rows.forEach(row => {
-                // A ordem dos índices agora corresponde à nova ordem das colunas
-                const sheetLeadId = row[0]; // Coluna A
-                const sheetPhone = row[1] ? row[1].replace(/\D/g, '') : null; // Coluna B
-                const sheetEmail = row[2] ? row[2].toLowerCase() : null; // Coluna C
+                const sheetLeadId = row[0];
+                const sheetPhone = row[1] ? row[1].replace(/\D/g, '') : null;
+                const sheetEmail = row[2] ? row[2].toLowerCase() : null;
 
                 if (sheetEmail && emailCRM && sheetEmail === emailCRM) {
                     facebookLeadId = sheetLeadId;
