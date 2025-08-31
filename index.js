@@ -31,7 +31,7 @@ app.post('/webhook', async (req, res) => {
         // Pega os dados enviados pelo webhook do CRM
         const leadData = req.body;
         
-        // CORREÇÃO FINAL: Usa os nomes dos campos que vieram no teste real
+        // CORREÇÃO: Usa os nomes dos campos que vieram no teste real
         const crmEventName = leadData.tag ? leadData.tag.name : null;
         
         if (!crmEventName) {
@@ -67,7 +67,8 @@ app.post('/webhook', async (req, res) => {
         );
         const sheets = google.sheets({ version: 'v4', auth });
 
-        const range = 'Página1!A:C';
+        // CORREÇÃO FINAL: A linha agora lê o intervalo correto de colunas
+        const range = 'Lead geral!A:Q';
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range,
@@ -78,9 +79,10 @@ app.post('/webhook', async (req, res) => {
 
         if (rows.length) {
             rows.forEach(row => {
-                const sheetEmail = row[0] ? row[0].toLowerCase() : null;
-                const sheetPhone = row[1] ? row[1].replace(/\D/g, '') : null;
-                const sheetLeadId = row[2];
+                // CORREÇÃO FINAL: Os índices agora correspondem às colunas A (0), P (15) e Q (16)
+                const sheetLeadId = row[0]; // Coluna A
+                const sheetPhone = row[15] ? row[15].replace(/\D/g, '') : null; // Coluna P
+                const sheetEmail = row[16] ? row[16].toLowerCase() : null; // Coluna Q
 
                 if (sheetEmail && emailCRM && sheetEmail === emailCRM) {
                     facebookLeadId = sheetLeadId;
