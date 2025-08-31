@@ -5,8 +5,8 @@ import { GoogleSpreadsheet } from "google-spreadsheet";
 const app = express();
 app.use(express.json());
 
-// Variáveis de ambiente
-const PORT = process.env.PORT || 8080; // Fly.io usa 8080 por padrão
+// Variáveis de ambiente Fly.io
+const PORT = process.env.PORT || 8080; // Fly.io usa 8080
 const PIXEL_ID = process.env.PIXEL_ID;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -43,7 +43,7 @@ async function initGoogleSheets() {
 
 await initGoogleSheets();
 
-// Função para buscar lead na planilha
+// Função para buscar lead na planilha pelo email ou telefone
 async function getLeadFromSheet(email, phone) {
   const sheet = doc.sheetsByIndex[0];
   const rows = await sheet.getRows();
