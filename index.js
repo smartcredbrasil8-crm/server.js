@@ -40,7 +40,6 @@ const initializeDatabase = async () => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
-                crm_id TEXT,
                 email TEXT,
                 phone TEXT
             );
@@ -71,7 +70,7 @@ app.get('/importar', (req, res) => {
         <body>
             <h1>Importar Leads para o Banco de Dados</h1>
             <p>Cole seus dados JSON aqui e clique em Importar.</p>
-            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "crm_id": "ID_CRM", "email": "email@exemplo.com", "phone": "+5511987654321"}]'></textarea><br>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "email": "email@exemplo.com", "phone": "+5511987654321"}]'></textarea><br>
             <button onclick="importLeads()">Importar Leads</button>
             <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
 
@@ -108,16 +107,15 @@ app.post('/import-leads', async (req, res) => {
 
     try {
         const queryText = `
-            INSERT INTO leads (facebook_lead_id, crm_id, email, phone)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO leads (facebook_lead_id, email, phone)
+            VALUES ($1, $2, $3)
             ON CONFLICT (facebook_lead_id) DO UPDATE SET
-                crm_id = EXCLUDED.crm_id,
                 email = EXCLUDED.email,
                 phone = EXCLUDED.phone;
         `;
 
         for (const lead of leadsToImport) {
-            await client.query(queryText, [lead.facebook_lead_id, lead.crm_id, lead.email, lead.phone]);
+            await client.query(queryText, [lead.facebook_lead_id, lead.email, lead.phone]);
         }
 
         res.status(201).send('Leads importados com sucesso!');
@@ -132,7 +130,7 @@ app.post('/webhook', async (req, res) => {
     try {
         const leadData = req.body;
         const crmEventName = leadData.tag ? leadData.tag.name : null;
-
+        
         if (!crmEventName) {
             console.log('Webhook recebido, mas sem nome de evento válido. Nenhuma ação será tomada.');
             return res.status(200).send('Webhook recebido, mas sem nome de evento.');
@@ -140,16 +138,21 @@ app.post('/webhook', async (req, res) => {
 
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
 
-        if (!leadData || !leadData.lead || !leadData.lead.id) {
+        if (!leadData || !leadData.lead) {
             return res.status(400).send('Dados do lead ausentes no webhook.');
         }
 
-        const crmId = leadData.lead.id;
-
-        // Busca o ID do Facebook no banco de dados usando o ID do CRM
+        const leadEmail = leadData.lead.email ? leadData.lead.email.toLowerCase() : null;
+        const leadPhone = leadData.lead.phone ? leadData.lead.phone.replace(/\D/g, '') : null;
+        
+        if (!leadEmail && !leadPhone) {
+            return res.status(400).send('E-mail ou telefone do lead ausentes no webhook.');
+        }
+        
+        // Busca o ID do Facebook no banco de dados usando o e-mail ou telefone
         const result = await client.query(
-            'SELECT facebook_lead_id, email, phone FROM leads WHERE crm_id = $1',
-            [crmId]
+            'SELECT facebook_lead_id FROM leads WHERE email = $1 OR phone = $2',
+            [leadEmail, leadPhone]
         );
 
         if (result.rows.length === 0) {
@@ -158,12 +161,10 @@ app.post('/webhook', async (req, res) => {
         }
 
         const facebookLeadId = result.rows[0].facebook_lead_id;
-        const leadEmail = result.rows[0].email;
-        const leadPhone = result.rows[0].phone;
-
+        
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-
+        
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
@@ -178,7 +179,7 @@ app.post('/webhook', async (req, res) => {
         };
 
         const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
-
+        
         await axios.post(facebookAPIUrl, {
             data: [eventData]
         });
