@@ -1,0 +1,23 @@
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Fly CLI
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          echo "::add-path::$HOME/.fly/bin"
+
+      - name: Authenticate Fly
+        run: fly auth token ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy to Fly
+        run: fly deploy --config fly.toml --remote-only
