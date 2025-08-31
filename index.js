@@ -31,9 +31,15 @@ app.post('/webhook', async (req, res) => {
         // Pega os dados enviados pelo webhook do CRM
         const leadData = req.body;
         
-        // CORREÇÃO: O nome do evento está em 'marcação.nome', não 'stage_name'
-        const crmEventName = leadData.marcação.nome; 
+        // CORREÇÃO: Verifica se o objeto 'marcação' existe antes de tentar ler 'nome'
+        const crmEventName = leadData.marcação ? leadData.marcação.nome : null;
         
+        // Se não houver nome de evento, a gente não faz nada
+        if (!crmEventName) {
+            console.log('Webhook recebido, mas sem nome de evento válido. Nenhuma ação será tomada.');
+            return res.status(200).send('Webhook recebido, mas sem nome de evento.');
+        }
+
         // Mapeia o evento do CRM para o evento do Facebook
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
 
