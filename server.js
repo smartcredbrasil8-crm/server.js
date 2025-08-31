@@ -1,32 +1,19 @@
 import express from "express";
 import fetch from "node-fetch";
-import fs from "fs";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 
 const app = express();
 app.use(express.json());
 
-// Variáveis de ambiente Render
-const PORT = process.env.PORT || 10000;
+// Variáveis de ambiente
+const PORT = process.env.PORT || 8080; // Fly.io usa 8080 por padrão
 const PIXEL_ID = process.env.PIXEL_ID;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-
-// Caminho do arquivo secreto no Render
-const GOOGLE_CREDENTIALS_PATH = "/run/secrets/google-credentials.json";
-
-// Ler arquivo secreto do Google
-let googleCredentials;
-try {
-  const content = fs.readFileSync(GOOGLE_CREDENTIALS_PATH, "utf8");
-  googleCredentials = JSON.parse(content);
-} catch (err) {
-  console.error("❌ Não foi possível ler o arquivo secreto do Google:", err);
-}
-
-// Atribuir variáveis do Google
-const GOOGLE_CLIENT_EMAIL = googleCredentials?.client_email;
-const GOOGLE_PRIVATE_KEY = googleCredentials?.private_key?.replace(/\\n/g, "\n");
-const SPREADSHEET_ID = googleCredentials?.spreadsheet_id;
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
+  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
+  : undefined;
 
 // Debug: verificar se as variáveis estão carregadas
 console.log("PIXEL_ID:", PIXEL_ID ? "OK" : "❌ NÃO CARREGADO");
@@ -56,10 +43,9 @@ async function initGoogleSheets() {
 
 await initGoogleSheets();
 
-// Função para buscar lead na planilha pelo e-mail ou telefone
+// Função para buscar lead na planilha
 async function getLeadFromSheet(email, phone) {
   const sheet = doc.sheetsByIndex[0];
-  await sheet.loadCells();
   const rows = await sheet.getRows();
   return rows.find(
     (row) =>
@@ -67,7 +53,7 @@ async function getLeadFromSheet(email, phone) {
   );
 }
 
-// Função para enviar evento para Pixel
+// Função para enviar evento ao Pixel
 async function sendPixelEvent(eventName, leadId, email, phone) {
   const payload = {
     data: [
@@ -86,7 +72,6 @@ async function sendPixelEvent(eventName, leadId, email, phone) {
   };
 
   const url = `https://graph.facebook.com/v17.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`;
-
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -97,7 +82,7 @@ async function sendPixelEvent(eventName, leadId, email, phone) {
   console.log("Evento enviado:", json);
 }
 
-// Webhook do CRM recebendo status do lead
+// Webhook CRM
 app.post("/webhook", async (req, res) => {
   try {
     const { email, telefone, status, crmLeadId } = req.body;
