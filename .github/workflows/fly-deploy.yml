@@ -1,23 +1,35 @@
-name: Deploy to Fly.io
+name: Deploy Fly.io
 
 on:
   push:
     branches:
-      - main
+      - main   # Sempre que houver push na branch main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      # Passo 1: Puxar o código do repositório
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Install Fly CLI
-        run: |
-          curl -L https://fly.io/install.sh | sh
-          echo "::add-path::$HOME/.fly/bin"
+      # Passo 2: Instalar Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
-      - name: Authenticate Fly
-        run: fly auth token ${{ secrets.FLY_API_TOKEN }}
+      # Passo 3: Instalar dependências
+      - name: Install dependencies
+        run: npm install
 
-      - name: Deploy to Fly
-        run: fly deploy --config fly.toml --remote-only
+      # Passo 4: Configurar Fly.io CLI
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: latest
+
+      # Passo 5: Deploy no Fly.io
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only --config fly.toml
