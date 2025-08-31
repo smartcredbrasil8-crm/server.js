@@ -40,8 +40,8 @@ const initializeDatabase = async () => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
-                email TEXT,
-                phone TEXT
+                phone TEXT,
+                email TEXT
             );
         `);
         console.log('Tabela "leads" verificada/criada com sucesso.');
@@ -69,8 +69,8 @@ app.get('/importar', (req, res) => {
         </head>
         <body>
             <h1>Importar Leads para o Banco de Dados</h1>
-            <p>Cole seus dados JSON aqui e clique em Importar.</p>
-            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "email": "email@exemplo.com", "phone": "+5511987654321"}]'></textarea><br>
+            <p>Cole seus dados JSON aqui e clique em Importar. Lembre-se da ordem: ID Facebook, Telefone, E-mail.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "phone": "+5511987654321", "email": "email@exemplo.com"}]'></textarea><br>
             <button onclick="importLeads()">Importar Leads</button>
             <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
 
@@ -107,15 +107,15 @@ app.post('/import-leads', async (req, res) => {
 
     try {
         const queryText = `
-            INSERT INTO leads (facebook_lead_id, email, phone)
+            INSERT INTO leads (facebook_lead_id, phone, email)
             VALUES ($1, $2, $3)
             ON CONFLICT (facebook_lead_id) DO UPDATE SET
-                email = EXCLUDED.email,
-                phone = EXCLUDED.phone;
+                phone = EXCLUDED.phone,
+                email = EXCLUDED.email;
         `;
 
         for (const lead of leadsToImport) {
-            await client.query(queryText, [lead.facebook_lead_id, lead.email, lead.phone]);
+            await client.query(queryText, [lead.facebook_lead_id, lead.phone, lead.email]);
         }
 
         res.status(201).send('Leads importados com sucesso!');
