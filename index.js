@@ -13,15 +13,15 @@ app.use(express.json());
 
 // Função para mapear o evento do CRM para o evento do Facebook
 const mapCRMEventToFacebookEvent = (crmEvent) => {
-    switch (crmEvent) {
-        case 'Oportunidade':
+    switch (crmEvent.toUpperCase()) {
+        case 'OPORTUNIDADE':
             return 'Em análise';
-        case 'Vídeo':
+        case 'VÍDEO':
             return 'Qualificado';
-        case 'Vencemos':
+        case 'VENCEMOS':
             return 'Convertido';
         default:
-            return crmEvent; // Retorna o próprio nome do evento se não houver um mapeamento
+            return crmEvent;
     }
 };
 
@@ -31,39 +31,34 @@ app.post('/webhook', async (req, res) => {
         // Pega os dados enviados pelo webhook do CRM
         const leadData = req.body;
         
-        // CORREÇÃO: Verifica se o objeto 'marcação' existe antes de tentar ler 'nome'
-        const crmEventName = leadData.marcação ? leadData.marcação.nome : null;
+        // CORREÇÃO FINAL: Usa os nomes dos campos que vieram no teste real
+        const crmEventName = leadData.tag ? leadData.tag.name : null;
         
-        // Se não houver nome de evento, a gente não faz nada
         if (!crmEventName) {
             console.log('Webhook recebido, mas sem nome de evento válido. Nenhuma ação será tomada.');
             return res.status(200).send('Webhook recebido, mas sem nome de evento.');
         }
 
-        // Mapeia o evento do CRM para o evento do Facebook
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
 
-        // Se o webhook não tiver os dados necessários, retorna um erro
-        if (!leadData || !leadData.liderar) {
+        if (!leadData || !leadData.lead) {
             return res.status(400).send('Dados do lead ausentes no webhook.');
         }
 
-        // Pega as variáveis de ambiente que você configurou no Render
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
         const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
         const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
         const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-        // Pega o e-mail e o telefone do lead
-        const emailCRM = leadData.liderar.e-mail ? leadData.liderar.e-mail.toLowerCase() : null;
-        const phoneCRM = leadData.liderar.telefone ? leadData.liderar.telefone.replace(/\D/g, '') : null;
+        // Pega o e-mail e o telefone do lead usando os nomes de campos corretos
+        const emailCRM = leadData.lead.email ? leadData.lead.email.toLowerCase() : null;
+        const phoneCRM = leadData.lead.phone ? leadData.lead.phone.replace(/\D/g, '') : null;
 
         if (!emailCRM && !phoneCRM) {
             return res.status(400).send('E-mail ou telefone do lead ausentes.');
         }
 
-        // Configura a autenticação com a API do Google Sheets
         const auth = new google.auth.JWT(
             GOOGLE_CLIENT_EMAIL,
             null,
@@ -72,8 +67,7 @@ app.post('/webhook', async (req, res) => {
         );
         const sheets = google.sheets({ version: 'v4', auth });
 
-        // Lê a planilha para encontrar o ID original do Facebook
-        const range = 'Página1!A:C'; // Altere 'Página1' para o nome da sua aba na planilha
+        const range = 'Página1!A:C';
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range,
@@ -83,11 +77,10 @@ app.post('/webhook', async (req, res) => {
         let facebookLeadId = null;
 
         if (rows.length) {
-            // Percorre cada linha da planilha para encontrar a correspondência
             rows.forEach(row => {
                 const sheetEmail = row[0] ? row[0].toLowerCase() : null;
                 const sheetPhone = row[1] ? row[1].replace(/\D/g, '') : null;
-                const sheetLeadId = row[2]; // Supondo que a coluna C tenha o ID do Facebook
+                const sheetLeadId = row[2];
 
                 if (sheetEmail && emailCRM && sheetEmail === emailCRM) {
                     facebookLeadId = sheetLeadId;
@@ -97,13 +90,11 @@ app.post('/webhook', async (req, res) => {
             });
         }
         
-        // Se não encontrar o ID do Facebook na planilha, não faz nada
         if (!facebookLeadId) {
             console.log('ID do Facebook não encontrado para este lead. Nenhuma ação será tomada.');
             return res.status(200).send('ID do Facebook não encontrado.');
         }
 
-        // Se encontrar o ID, prepara os dados para enviar ao Facebook
         const emailHashed = crypto.createHash('sha256').update(emailCRM).digest('hex');
 
         const userData = {
@@ -119,7 +110,6 @@ app.post('/webhook', async (req, res) => {
             }
         };
 
-        // Dispara o evento de conversão para a API do Facebook
         const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
         
         await axios.post(facebookAPIUrl, {
@@ -135,7 +125,6 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Inicia o servidor para escutar as requisições
 app.listen(port, () => {
     console.log(`Servidor rodando na porta ${port}`);
 });
