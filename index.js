@@ -172,9 +172,12 @@ app.post('/webhook', async (req, res) => {
         const eventData = {
             event_name: facebookEventName,
             event_time: Math.floor(Date.now() / 1000),
+            action_source: 'system_generated', // Adicionado para indicar que o evento é gerado pelo sistema
             user_data: userData,
             custom_data: {
-                lead_id: facebookLeadId
+                lead_id: facebookLeadId,
+                event_source: 'crm', // Adicionado para indicar que a origem é um CRM
+                lead_event_source: 'Your CRM' // Adicionado para detalhar a origem
             }
         };
 
