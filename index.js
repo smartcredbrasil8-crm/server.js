@@ -38,27 +38,35 @@ const initializeDatabase = async () => {
         await client.connect();
         console.log('Conexão com o banco de dados estabelecida.');
 
-        // Verifica e cria a tabela 'leads' se ela não existir
+        // Garante que a tabela 'leads' com as colunas essenciais existe
         await client.query(`
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
                 phone TEXT,
-                email TEXT,
-                city TEXT,
-                estado TEXT
+                email TEXT
             );
         `);
         console.log('Tabela "leads" verificada/criada com sucesso.');
-        
-        // Verifica se a coluna 'full_name' existe e a adiciona se não existir
-        const columnCheck = await client.query(`
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name='leads' AND column_name='full_name';
-        `);
-        
-        if (columnCheck.rows.length === 0) {
-            await client.query(`ALTER TABLE leads ADD COLUMN full_name TEXT;`);
+
+        // Verifica e adiciona a coluna 'full_name' se não existir
+        const fullNameCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='full_name'");
+        if (fullNameCheck.rows.length === 0) {
+            await client.query("ALTER TABLE leads ADD COLUMN full_name TEXT;");
             console.log('Coluna "full_name" adicionada à tabela "leads".');
+        }
+
+        // Verifica e adiciona a coluna 'city' se não existir
+        const cityCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='city'");
+        if (cityCheck.rows.length === 0) {
+            await client.query("ALTER TABLE leads ADD COLUMN city TEXT;");
+            console.log('Coluna "city" adicionada à tabela "leads".');
+        }
+
+        // Verifica e adiciona a coluna 'estado' se não existir
+        const estadoCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='estado'");
+        if (estadoCheck.rows.length === 0) {
+            await client.query("ALTER TABLE leads ADD COLUMN estado TEXT;");
+            console.log('Coluna "estado" adicionada à tabela "leads".');
         }
 
     } catch (err) {
