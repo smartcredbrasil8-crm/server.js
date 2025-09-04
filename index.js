@@ -121,7 +121,14 @@ app.post('/import-leads', async (req, res) => {
         `;
 
         for (const lead of leadsToImport) {
-            const normalizedPhone = lead.phone ? lead.phone.replace(/\D/g, '') : null;
+            // Garante que o lead é um objeto válido e tem um ID do Facebook
+            if (!lead || typeof lead !== 'object' || !lead.facebook_lead_id) {
+                console.error('Dados de lead inválidos no lote:', lead);
+                continue; // Pula para o próximo item
+            }
+
+            // Normaliza os dados antes de inseri-los no banco de dados
+            const normalizedPhone = (lead.phone || '').replace(/\D/g, '');
             const leadFullName = lead.full_name || null;
             const leadCity = lead.city || null;
             const leadEstado = lead.estado || null;
