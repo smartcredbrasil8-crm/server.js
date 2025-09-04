@@ -25,7 +25,7 @@ const mapCRMEventToFacebookEvent = (crmEvent) => {
     }
 };
 
-// Conecta ao banco de dados e cria a tabela se ela não existir
+// Conecta ao banco de dados e garante que a tabela e as colunas existam
 const client = new Client({
     connectionString: process.env.DATABASE_URL,
     ssl: {
@@ -37,17 +37,30 @@ const initializeDatabase = async () => {
     try {
         await client.connect();
         console.log('Conexão com o banco de dados estabelecida.');
+
+        // Verifica e cria a tabela 'leads' se ela não existir
         await client.query(`
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
                 phone TEXT,
                 email TEXT,
-                full_name TEXT,
                 city TEXT,
                 estado TEXT
             );
         `);
         console.log('Tabela "leads" verificada/criada com sucesso.');
+        
+        // Verifica se a coluna 'full_name' existe e a adiciona se não existir
+        const columnCheck = await client.query(`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='leads' AND column_name='full_name';
+        `);
+        
+        if (columnCheck.rows.length === 0) {
+            await client.query(`ALTER TABLE leads ADD COLUMN full_name TEXT;`);
+            console.log('Coluna "full_name" adicionada à tabela "leads".');
+        }
+
     } catch (err) {
         console.error('Erro ao conectar ou inicializar o banco de dados', err.message);
     }
@@ -55,7 +68,7 @@ const initializeDatabase = async () => {
 
 initializeDatabase();
 
-// NOVO ENDPOINT: Rota para exibir o formulário de importação
+// ENDPOINT: Rota para exibir o formulário de importação
 app.get('/importar', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -121,13 +134,11 @@ app.post('/import-leads', async (req, res) => {
         `;
 
         for (const lead of leadsToImport) {
-            // Garante que o lead é um objeto válido e tem um ID do Facebook
             if (!lead || typeof lead !== 'object' || !lead.facebook_lead_id) {
                 console.error('Dados de lead inválidos no lote:', lead);
-                continue; // Pula para o próximo item
+                continue;
             }
 
-            // Normaliza os dados antes de inseri-los no banco de dados
             const normalizedPhone = (lead.phone || '').replace(/\D/g, '');
             const leadFullName = lead.full_name || null;
             const leadCity = lead.city || null;
