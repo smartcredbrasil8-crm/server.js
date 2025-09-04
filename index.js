@@ -121,7 +121,8 @@ app.post('/import-leads', async (req, res) => {
         `;
 
         for (const lead of leadsToImport) {
-            await client.query(queryText, [lead.facebook_lead_id, lead.phone, lead.email, lead.full_name, lead.city, lead.estado]);
+            const normalizedPhone = lead.phone ? lead.phone.replace(/\D/g, '') : null;
+            await client.query(queryText, [lead.facebook_lead_id, normalizedPhone, lead.email, lead.full_name, lead.city, lead.estado]);
         }
 
         res.status(201).send('Leads importados com sucesso!');
