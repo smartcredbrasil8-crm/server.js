@@ -41,7 +41,10 @@ const initializeDatabase = async () => {
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
                 phone TEXT,
-                email TEXT
+                email TEXT,
+                full_name TEXT,
+                city TEXT,
+                estado TEXT
             );
         `);
         console.log('Tabela "leads" verificada/criada com sucesso.');
@@ -69,8 +72,8 @@ app.get('/importar', (req, res) => {
         </head>
         <body>
             <h1>Importar Leads para o Banco de Dados</h1>
-            <p>Cole seus dados JSON aqui e clique em Importar. Lembre-se da ordem: ID Facebook, Telefone, E-mail.</p>
-            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "phone": "+5511987654321", "email": "email@exemplo.com"}]'></textarea><br>
+            <p>Cole seus dados JSON aqui e clique em Importar. Lembre-se da ordem: ID Facebook, Telefone, E-mail, Nome Completo, Cidade, Estado.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "phone": "+5511987654321", "email": "email@exemplo.com", "full_name": "Nome Completo", "city": "Cidade", "estado": "Estado"}]'></textarea><br>
             <button onclick="importLeads()">Importar Leads</button>
             <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
 
@@ -107,15 +110,18 @@ app.post('/import-leads', async (req, res) => {
 
     try {
         const queryText = `
-            INSERT INTO leads (facebook_lead_id, phone, email)
-            VALUES ($1, $2, $3)
+            INSERT INTO leads (facebook_lead_id, phone, email, full_name, city, estado)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (facebook_lead_id) DO UPDATE SET
                 phone = EXCLUDED.phone,
-                email = EXCLUDED.email;
+                email = EXCLUDED.email,
+                full_name = EXCLUDED.full_name,
+                city = EXCLUDED.city,
+                estado = EXCLUDED.estado;
         `;
 
         for (const lead of leadsToImport) {
-            await client.query(queryText, [lead.facebook_lead_id, lead.phone, lead.email]);
+            await client.query(queryText, [lead.facebook_lead_id, lead.phone, lead.email, lead.full_name, lead.city, lead.estado]);
         }
 
         res.status(201).send('Leads importados com sucesso!');
@@ -149,9 +155,9 @@ app.post('/webhook', async (req, res) => {
             return res.status(400).send('E-mail ou telefone do lead ausentes no webhook.');
         }
         
-        // Busca o ID do Facebook no banco de dados usando o e-mail ou telefone
+        // Busca o ID do Facebook e os novos dados no banco de dados usando o e-mail ou telefone
         const result = await client.query(
-            'SELECT facebook_lead_id FROM leads WHERE email = $1 OR phone = $2',
+            'SELECT facebook_lead_id, full_name, city, estado FROM leads WHERE email = $1 OR phone = $2',
             [leadEmail, leadPhone]
         );
 
@@ -161,6 +167,9 @@ app.post('/webhook', async (req, res) => {
         }
 
         const facebookLeadId = result.rows[0].facebook_lead_id;
+        const leadFullName = result.rows[0].full_name;
+        const leadCity = result.rows[0].city;
+        const leadEstado = result.rows[0].estado;
         
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
@@ -168,16 +177,19 @@ app.post('/webhook', async (req, res) => {
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
+        if (leadFullName) userData.fn = [crypto.createHash('sha256').update(leadFullName.toLowerCase()).digest('hex')];
+        if (leadCity) userData.ct = [crypto.createHash('sha256').update(leadCity.toLowerCase()).digest('hex')];
+        if (leadEstado) userData.st = [crypto.createHash('sha256').update(leadEstado.toLowerCase()).digest('hex')];
 
         const eventData = {
             event_name: facebookEventName,
             event_time: Math.floor(Date.now() / 1000),
-            action_source: 'system_generated', // Adicionado para indicar que o evento é gerado pelo sistema
+            action_source: 'system_generated',
             user_data: userData,
             custom_data: {
                 lead_id: facebookLeadId,
-                event_source: 'crm', // Adicionado para indicar que a origem é um CRM
-                lead_event_source: 'Your CRM' // Adicionado para detalhar a origem
+                event_source: 'crm',
+                lead_event_source: 'Your CRM'
             }
         };
 
