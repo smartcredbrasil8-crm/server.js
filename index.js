@@ -49,7 +49,7 @@ const initializeDatabase = async () => {
         await client.connect();
         console.log('Conexão com o banco de dados estabelecida.');
 
-        // Garante que a tabela 'leads' com as colunas essenciais existe
+        // Garante que a tabela 'leads' com as colunas essenciais exista
         await client.query(`
             CREATE TABLE IF NOT EXISTS leads (
                 facebook_lead_id TEXT PRIMARY KEY,
@@ -59,25 +59,22 @@ const initializeDatabase = async () => {
         `);
         console.log('Tabela "leads" verificada/criada com sucesso.');
 
-        // Verifica e adiciona a coluna 'full_name' se não existir
-        const fullNameCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='full_name'");
-        if (fullNameCheck.rows.length === 0) {
-            await client.query("ALTER TABLE leads ADD COLUMN full_name TEXT;");
-            console.log('Coluna "full_name" adicionada à tabela "leads".');
-        }
+        // Dicionário de colunas para verificar e adicionar
+        const columns = {
+            'first_name': 'TEXT',
+            'last_name': 'TEXT',
+            'dob': 'TEXT', // Date of Birth
+            'city': 'TEXT',
+            'estado': 'TEXT',
+            'zip_code': 'TEXT'
+        };
 
-        // Verifica e adiciona a coluna 'city' se não existir
-        const cityCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='city'");
-        if (cityCheck.rows.length === 0) {
-            await client.query("ALTER TABLE leads ADD COLUMN city TEXT;");
-            console.log('Coluna "city" adicionada à tabela "leads".');
-        }
-
-        // Verifica e adiciona a coluna 'estado' se não existir
-        const estadoCheck = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='estado'");
-        if (estadoCheck.rows.length === 0) {
-            await client.query("ALTER TABLE leads ADD COLUMN estado TEXT;");
-            console.log('Coluna "estado" adicionada à tabela "leads".');
+        for (const [columnName, columnType] of Object.entries(columns)) {
+            const check = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name=$1", [columnName]);
+            if (check.rows.length === 0) {
+                await client.query(`ALTER TABLE leads ADD COLUMN ${columnName} ${columnType};`);
+                console.log(`Coluna "${columnName}" adicionada à tabela "leads".`);
+            }
         }
 
     } catch (err) {
@@ -96,7 +93,7 @@ app.get('/importar', (req, res) => {
             <title>Importar Leads</title>
             <style>
                 body { font-family: sans-serif; text-align: center; margin-top: 50px; }
-                textarea { width: 600px; height: 300px; margin-top: 20px; font-family: monospace; }
+                textarea { width: 800px; height: 300px; margin-top: 20px; font-family: monospace; }
                 button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
                 h1 { color: #333; }
                 p { color: #666; }
@@ -104,8 +101,8 @@ app.get('/importar', (req, res) => {
         </head>
         <body>
             <h1>Importar Leads para o Banco de Dados</h1>
-            <p>Cole seus dados JSON aqui e clique em Importar. Lembre-se da ordem: ID Facebook, Telefone, E-mail, Nome Completo, Cidade, Estado.</p>
-            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "phone": "+5511987654321", "email": "email@exemplo.com", "full_name": "Nome Completo", "city": "Cidade", "estado": "Estado"}]'></textarea><br>
+            <p>Cole seus dados JSON aqui. Use as chaves: facebook_lead_id, first_name, last_name, phone, email, dob, city, estado, zip_code.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "first_name": "Joao", "last_name": "Silva", "phone": "+5511987654321", "email": "email@exemplo.com", "dob": "19901231", "city": "Sao Paulo", "estado": "SP", "zip_code": "01000000"}]'></textarea><br>
             <button onclick="importLeads()">Importar Leads</button>
             <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
 
@@ -142,14 +139,17 @@ app.post('/import-leads', async (req, res) => {
 
     try {
         const queryText = `
-            INSERT INTO leads (facebook_lead_id, phone, email, full_name, city, estado)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO leads (facebook_lead_id, email, phone, first_name, last_name, dob, city, estado, zip_code)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (facebook_lead_id) DO UPDATE SET
-                phone = EXCLUDED.phone,
                 email = EXCLUDED.email,
-                full_name = EXCLUDED.full_name,
+                phone = EXCLUDED.phone,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                dob = EXCLUDED.dob,
                 city = EXCLUDED.city,
-                estado = EXCLUDED.estado;
+                estado = EXCLUDED.estado,
+                zip_code = EXCLUDED.zip_code;
         `;
 
         for (const lead of leadsToImport) {
@@ -157,13 +157,18 @@ app.post('/import-leads', async (req, res) => {
                 console.error('Dados de lead inválidos no lote:', lead);
                 continue;
             }
-
-            const normalizedPhone = (lead.phone || '').replace(/\D/g, '');
-            const leadFullName = lead.full_name || null;
-            const leadCity = lead.city || null;
-            const leadEstado = lead.estado || null;
             
-            await client.query(queryText, [lead.facebook_lead_id, normalizedPhone, lead.email, leadFullName, leadCity, leadEstado]);
+            await client.query(queryText, [
+                lead.facebook_lead_id,
+                lead.email || null,
+                (lead.phone || '').replace(/\D/g, ''),
+                lead.first_name || null,
+                lead.last_name || null,
+                lead.dob || null,
+                lead.city || null,
+                lead.estado || null,
+                lead.zip_code || null
+            ]);
         }
 
         res.status(201).send('Leads importados com sucesso!');
@@ -199,7 +204,7 @@ app.post('/webhook', async (req, res) => {
         
         // Busca o ID do Facebook e os novos dados no banco de dados usando o e-mail ou telefone
         const result = await client.query(
-            'SELECT facebook_lead_id, full_name, city, estado FROM leads WHERE email = $1 OR phone = $2',
+            'SELECT facebook_lead_id, first_name, last_name, dob, city, estado, zip_code FROM leads WHERE email = $1 OR phone = $2',
             [leadEmail, leadPhone]
         );
 
@@ -208,20 +213,22 @@ app.post('/webhook', async (req, res) => {
             return res.status(200).send('ID do Facebook não encontrado.');
         }
 
-        const facebookLeadId = result.rows[0].facebook_lead_id;
-        const leadFullName = result.rows[0].full_name;
-        const leadCity = result.rows[0].city;
-        const leadEstado = result.rows[0].estado;
+        const dbRow = result.rows[0];
+        const facebookLeadId = dbRow.facebook_lead_id;
         
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
         
+        // Prepara os dados do usuário para o HASH, somente se existirem
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
-        if (leadFullName) userData.fn = [crypto.createHash('sha256').update(leadFullName.toLowerCase()).digest('hex')];
-        if (leadCity) userData.ct = [crypto.createHash('sha256').update(leadCity.toLowerCase()).digest('hex')];
-        if (leadEstado) userData.st = [crypto.createHash('sha256').update(leadEstado.toLowerCase()).digest('hex')];
+        if (dbRow.first_name) userData.fn = [crypto.createHash('sha256').update(dbRow.first_name.toLowerCase()).digest('hex')];
+        if (dbRow.last_name) userData.ln = [crypto.createHash('sha256').update(dbRow.last_name.toLowerCase()).digest('hex')];
+        if (dbRow.dob) userData.db = [crypto.createHash('sha256').update(String(dbRow.dob).replace(/\D/g, '')).digest('hex')];
+        if (dbRow.city) userData.ct = [crypto.createHash('sha256').update(dbRow.city.toLowerCase()).digest('hex')];
+        if (dbRow.estado) userData.st = [crypto.createHash('sha256').update(dbRow.estado.toLowerCase()).digest('hex')];
+        if (dbRow.zip_code) userData.zp = [crypto.createHash('sha256').update(String(dbRow.zip_code).replace(/\D/g, '')).digest('hex')];
 
         const eventData = {
             event_name: facebookEventName,
