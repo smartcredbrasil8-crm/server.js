@@ -6,7 +6,6 @@ const crypto = require('crypto');
 
 // Cria uma instância do Express e define a porta do servidor
 const app = express();
-// Render define a porta pela variável de ambiente PORT. Usar 10000 como padrão.
 const port = process.env.PORT || 10000;
 
 // Middleware para entender dados JSON, com limite aumentado para 50mb
@@ -81,10 +80,45 @@ app.get('/importar', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html>
-        <head><title>Importar Leads</title> ... </head>
-        <body> ... </body>
+        <head>
+            <title>Importar Leads</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+                textarea { width: 800px; height: 300px; margin-top: 20px; font-family: monospace; }
+                button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+                h1 { color: #333; }
+                p { color: #666; }
+            </style>
+        </head>
+        <body>
+            <h1>Importar Leads para o Banco de Dados</h1>
+            <p>Cole seus dados JSON aqui. Use as chaves: facebook_lead_id, first_name, last_name, phone, email, dob, city, estado, zip_code.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "first_name": "Joao", "last_name": "Silva", "phone": "+5511987654321", "email": "email@exemplo.com", "dob": "19901231", "city": "Sao Paulo", "estado": "SP", "zip_code": "01000000"}]'></textarea><br>
+            <button onclick="importLeads()">Importar Leads</button>
+            <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
+
+            <script>
+                async function importLeads() {
+                    const data = document.getElementById('leads-data').value;
+                    const statusMessage = document.getElementById('status-message');
+                    try {
+                        const response = await fetch('/import-leads', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: data
+                        });
+                        const result = await response.text();
+                        statusMessage.textContent = result;
+                        statusMessage.style.color = 'green';
+                    } catch (error) {
+                        statusMessage.textContent = 'Erro na importação: ' + error.message;
+                        statusMessage.style.color = 'red';
+                    }
+                }
+            </script>
+        </body>
         </html>
-    `); // O HTML do formulário continua o mesmo
+    `);
 });
 
 // ENDPOINT: Onde o formulário de importação envia os dados
@@ -123,6 +157,7 @@ app.post('/webhook', async (req, res) => {
         const leadData = req.body;
         const crmEventName = leadData.tag ? leadData.tag.name : null;
         if (!crmEventName) {
+            console.log('Webhook recebido, mas sem nome de evento válido.');
             return res.status(200).send('Webhook recebido, mas sem nome de evento.');
         }
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
@@ -143,7 +178,6 @@ app.post('/webhook', async (req, res) => {
             return res.status(200).send('ID do Facebook não encontrado.');
         }
         const dbRow = result.rows[0];
-        // ... Lógica para enviar o evento ao Facebook ...
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
         const userData = {};
@@ -151,4 +185,27 @@ app.post('/webhook', async (req, res) => {
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
         if (dbRow.first_name) userData.fn = [crypto.createHash('sha256').update(dbRow.first_name.toLowerCase()).digest('hex')];
         if (dbRow.last_name) userData.ln = [crypto.createHash('sha256').update(dbRow.last_name.toLowerCase()).digest('hex')];
-        if (dbRow.dob) userData.db = [crypto.createHash('sha256').update(String(dbRow.dob).replace(/\D/g, '')).
+        if (dbRow.dob) userData.db = [crypto.createHash('sha256').update(String(dbRow.dob).replace(/\D/g, '')).digest('hex')];
+        if (dbRow.city) userData.ct = [crypto.createHash('sha256').update(dbRow.city.toLowerCase()).digest('hex')];
+        if (dbRow.estado) userData.st = [crypto.createHash('sha256').update(dbRow.estado.toLowerCase()).digest('hex')];
+        if (dbRow.zip_code) userData.zp = [crypto.createHash('sha256').update(String(dbRow.zip_code).replace(/\D/g, '')).digest('hex')];
+        const eventData = { event_name: facebookEventName, event_time: Math.floor(Date.now() / 1000), action_source: 'system_generated', user_data: userData, custom_data: { lead_id: dbRow.facebook_lead_id } };
+        const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
+        await axios.post(facebookAPIUrl, { data: [eventData] });
+        console.log(`Evento '${facebookEventName}' disparado para o lead com ID: ${dbRow.facebook_lead_id}`);
+        res.status(200).send('Evento de conversão enviado com sucesso!');
+    } catch (error) {
+        console.error('Erro ao processar o webhook:', error.response ? error.response.data : error.message);
+        res.status(500).send('Erro interno do servidor.');
+    }
+});
+
+// ROTA DE TESTE E HEALTH CHECK
+app.get('/', (req, res) => {
+  console.log("A rota principal (GET /) foi acessada com sucesso!");
+  res.status(200).send("Servidor no ar e respondendo.");
+});
+
+app.listen(port, () => {
+    console.log(`Servidor rodando na porta ${port}`);
+});
