@@ -3,11 +3,11 @@ const express = require('express');
 const { Pool } = require('pg');
 const axios = require('axios');
 const crypto = require('crypto');
-const cors = require('cors'); // <-- CORREÇÃO IMPORTANTE
+const cors = require('cors');
 
 // Cria uma instância do Express
 const app = express();
-app.use(cors()); // <-- CORREÇÃO IMPORTANTE (habilita o CORS para todas as rotas)
+app.use(cors()); // Habilita o CORS para todas as rotas
 const port = process.env.PORT || 10000;
 
 // Middleware para entender dados JSON
@@ -43,13 +43,7 @@ const initializeDatabase = async () => {
         console.log('Conexão com o pool do banco de dados estabelecida.');
         checkClient.release(); 
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS leads (
-                facebook_lead_id TEXT PRIMARY KEY,
-                phone TEXT,
-                email TEXT
-            );
-        `);
+        await pool.query(`CREATE TABLE IF NOT EXISTS leads (facebook_lead_id TEXT PRIMARY KEY, phone TEXT, email TEXT);`);
         console.log('Tabela "leads" verificada/criada com sucesso.');
 
         const columns = {
@@ -117,7 +111,7 @@ app.post('/webhook', async (req, res) => {
 
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-        if(!PIXEL_ID || !FB_ACCESS_TOKEN) {
+        if (!PIXEL_ID || !FB_ACCESS_TOKEN) {
             console.error('ERRO: Variáveis de ambiente PIXEL_ID ou FB_ACCESS_TOKEN não estão configuradas!');
             return res.status(500).send('Erro de configuração no servidor.');
         }
@@ -125,4 +119,39 @@ app.post('/webhook', async (req, res) => {
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
-        if (dbRow.first_name) userData.fn = [crypto.createHash('
+        if (dbRow.first_name) userData.fn = [crypto.createHash('sha256').update(dbRow.first_name.toLowerCase()).digest('hex')];
+        if (dbRow.last_name) userData.ln = [crypto.createHash('sha256').update(dbRow.last_name.toLowerCase()).digest('hex')];
+        if (dbRow.dob) userData.db = [crypto.createHash('sha256').update(String(dbRow.dob).replace(/\D/g, '')).digest('hex')];
+        if (dbRow.city) userData.ct = [crypto.createHash('sha256').update(dbRow.city.toLowerCase()).digest('hex')];
+        if (dbRow.estado) userData.st = [crypto.createHash('sha256').update(dbRow.estado.toLowerCase()).digest('hex')];
+        if (dbRow.zip_code) userData.zp = [crypto.createHash('sha256').update(String(dbRow.zip_code).replace(/\D/g, '')).digest('hex')];
+
+        const eventData = { event_name: facebookEventName, event_time: Math.floor(Date.now() / 1000), action_source: 'system_generated', user_data: userData, custom_data: { lead_id: dbRow.facebook_lead_id } };
+        const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
+        
+        console.log(`Enviando evento '${facebookEventName}' para a API do Facebook...`);
+        await axios.post(facebookAPIUrl, { data: [eventData] });
+
+        console.log(`Evento '${facebookEventName}' disparado com sucesso para o lead com ID: ${dbRow.facebook_lead_id}`);
+        res.status(200).send('Evento de conversão enviado com sucesso!');
+
+    } catch (error) {
+        if (error.response) {
+            console.error('Erro na API do Facebook:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            console.error('Erro ao processar o webhook:', error.message);
+        }
+        res.status(500).send('Erro interno do servidor.');
+    }
+});
+
+// ROTA DE TESTE E HEALTH CHECK
+app.get('/', (req, res) => {
+  console.log("A rota principal (GET /) foi acessada com sucesso!");
+  res.status(200).send("Servidor no ar e respondendo.");
+});
+
+// Inicia o servidor
+app.listen(port, () => {
+    console.log(`Servidor rodando na porta ${port}`);
+});
