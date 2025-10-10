@@ -1,60 +1,64 @@
 // Importa as bibliotecas necessárias para o projeto
 const express = require('express');
-// TROCA 1: Importa Pool em vez de Client
-const { Pool } = require('pg'); 
+const { Pool } = require('pg');
 const axios = require('axios');
 const crypto = require('crypto');
 
 // Cria uma instância do Express e define a porta do servidor
 const app = express();
-const port = process.env.PORT || 10000; // Render usa a porta 10000
+const port = process.env.PORT || 10000;
 
 // Middleware para entender dados JSON, com limite aumentado para 50mb
 app.use(express.json({ limit: '50mb' }));
 
-// ... (a função mapCRMEventToFacebookEvent continua a mesma) ...
+// Função para mapear o evento do CRM para o evento do Facebook
 const mapCRMEventToFacebookEvent = (crmEvent) => {
-    switch (crmEvent.toUpperCase()) {
+    switch (crmEvent.toUpperCase()) {
         case 'NOVOS': return 'Lead';
         case 'ATENDEU': return 'Atendeu';
-        case 'OPORTUNidade': return 'Oportunidade';
+        case 'OPORTUNIDADE': return 'Oportunidade';
         case 'AVANÇADO': return 'Avançado';
         case 'VÍDEO': return 'Vídeo';
         case 'VENCEMOS': return 'Vencemos';
         case 'QUER EMPREGO': return 'Desqualificado';
         case 'QUER EMPRESTIMO': return 'Não Qualificado';
         default: return crmEvent;
-    }
+    }
 };
 
-// TROCA 2: Cria um Pool em vez de um Client
+// Cria um Pool de conexões com o banco de dados
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false
-    }
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
-// TROCA 3: A inicialização do banco usa o pool para executar as queries
+// Função para inicializar o banco de dados (verificar/criar tabelas e colunas)
 const initializeDatabase = async () => {
-    try {
-        // Apenas para verificar, não precisa de connect() permanente
-        const checkClient = await pool.connect();
+    try {
+        const checkClient = await pool.connect();
         console.log('Conexão com o pool do banco de dados estabelecida.');
-        checkClient.release(); // Libera o cliente de volta para o pool
+        checkClient.release(); 
 
-        // Garante que a tabela 'leads' com as colunas essenciais exista
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS leads (
-                facebook_lead_id TEXT PRIMARY KEY,
-                phone TEXT,
-                email TEXT
-            );
-        `);
-        console.log('Tabela "leads" verificada/criada com sucesso.');
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS leads (
+                facebook_lead_id TEXT PRIMARY KEY,
+                phone TEXT,
+                email TEXT
+            );
+        `);
+        console.log('Tabela "leads" verificada/criada com sucesso.');
 
-        // ... (o resto da lógica de adicionar colunas pode continuar usando pool.query)
-        const columns = { 'first_name': 'TEXT', 'last_name': 'TEXT', 'dob': 'TEXT', 'city': 'TEXT', 'estado': 'TEXT', 'zip_code': 'TEXT' };
+        const columns = {
+            'first_name': 'TEXT',
+            'last_name': 'TEXT',
+            'dob': 'TEXT',
+            'city': 'TEXT',
+            'estado': 'TEXT',
+            'zip_code': 'TEXT'
+        };
+
         for (const [columnName, columnType] of Object.entries(columns)) {
             const check = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name=$1", [columnName]);
             if (check.rows.length === 0) {
@@ -63,71 +67,148 @@ const initializeDatabase = async () => {
             }
         }
 
-    } catch (err) {
-        console.error('Erro ao conectar ou inicializar o banco de dados', err.message);
-    }
+    } catch (err) {
+        console.error('Erro ao conectar ou inicializar o banco de dados:', err.message);
+    }
 };
 
+// Chama a função de inicialização ao iniciar o servidor
 initializeDatabase();
 
-// ... (A rota /importar continua a mesma) ...
-app.get('/importar', (req, res) => { res.send(`...`) });
+// ENDPOINT: Rota para exibir o formulário de importação
+app.get('/importar', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Importar Leads</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+                textarea { width: 800px; height: 300px; margin-top: 20px; font-family: monospace; }
+                button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+                h1 { color: #333; }
+                p { color: #666; }
+            </style>
+        </head>
+        <body>
+            <h1>Importar Leads para o Banco de Dados</h1>
+            <p>Cole seus dados JSON aqui. Use as chaves: facebook_lead_id, first_name, last_name, phone, email, dob, city, estado, zip_code.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "first_name": "Joao", "last_name": "Silva", "phone": "+5511987654321", "email": "email@exemplo.com", "dob": "19901231", "city": "Sao Paulo", "estado": "SP", "zip_code": "01000000"}]'></textarea><br>
+            <button onclick="importLeads()">Importar Leads</button>
+            <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
 
-
-// TROCA 4: A rota /import-leads agora usa pool.query
-app.post('/import-leads', async (req, res) => {
-    // ... (lógica de validação continua a mesma) ...
-    const leadsToImport = req.body;
-    if (!Array.isArray(leadsToImport) || leadsToImport.length === 0) {
-        return res.status(400).send('Dados de importação ausentes ou formato inválido.');
-    }
-    try {
-        const queryText = `
-            INSERT INTO leads (facebook_lead_id, email, phone, first_name, last_name, dob, city, estado, zip_code)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (facebook_lead_id) DO UPDATE SET email = EXCLUDED.email, phone = EXCLUDED.phone, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, dob = EXCLUDED.dob, city = EXCLUDED.city, estado = EXCLUDED.estado, zip_code = EXCLUDED.zip_code;
-        `;
-        for (const lead of leadsToImport) {
-            if (!lead || typeof lead !== 'object' || !lead.facebook_lead_id) continue;
-            // AQUI ESTÁ A MUDANÇA: usa pool.query em vez de client.query
-            await pool.query(queryText, [
-                lead.facebook_lead_id, lead.email || null, (lead.phone || '').replace(/\D/g, ''), lead.first_name || null, lead.last_name || null, lead.dob || null, lead.city || null, lead.estado || null, lead.zip_code || null
-            ]);
-        }
-        res.status(201).send('Leads importados com sucesso!');
-    } catch (error) {
-        console.error('Erro ao importar leads:', error.message);
-        res.status(500).send('Erro interno do servidor.');
-    }
+            <script>
+                async function importLeads() {
+                    const data = document.getElementById('leads-data').value;
+                    const statusMessage = document.getElementById('status-message');
+                    try {
+                        const response = await fetch('/import-leads', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: data
+                        });
+                        const result = await response.text();
+                        statusMessage.textContent = result;
+                        statusMessage.style.color = 'green';
+                    } catch (error) {
+                        statusMessage.textContent = 'Erro na importação: ' + error.message;
+                        statusMessage.style.color = 'red';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+    `);
 });
 
+// ENDPOINT: Onde o formulário de importação envia os dados
+app.post('/import-leads', async (req, res) => {
+    const leadsToImport = req.body;
+    if (!Array.isArray(leadsToImport) || leadsToImport.length === 0) {
+        return res.status(400).send('Dados de importação ausentes ou formato inválido.');
+    }
 
-// TROCA 5: A rota /webhook agora usa pool.query
+    try {
+        const queryText = `
+            INSERT INTO leads (facebook_lead_id, email, phone, first_name, last_name, dob, city, estado, zip_code)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (facebook_lead_id) DO UPDATE SET
+                email = EXCLUDED.email,
+                phone = EXCLUDED.phone,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                dob = EXCLUDED.dob,
+                city = EXCLUDED.city,
+                estado = EXCLUDED.estado,
+                zip_code = EXCLUDED.zip_code;
+        `;
+
+        for (const lead of leadsToImport) {
+            if (!lead || typeof lead !== 'object' || !lead.facebook_lead_id) {
+                console.error('Dados de lead inválidos no lote:', lead);
+                continue;
+            }
+            
+            await pool.query(queryText, [
+                lead.facebook_lead_id,
+                lead.email || null,
+                (lead.phone || '').replace(/\D/g, ''),
+                lead.first_name || null,
+                lead.last_name || null,
+                lead.dob || null,
+                lead.city || null,
+                lead.estado || null,
+                lead.zip_code || null
+            ]);
+        }
+
+        res.status(201).send('Leads importados com sucesso!');
+    } catch (error) {
+        console.error('Erro ao importar leads:', error.message);
+        res.status(500).send('Erro interno do servidor.');
+    }
+});
+
+// ENDPOINT DO WEBHOOK: Onde o CRM envia o evento
 app.post('/webhook', async (req, res) => {
-    try {
-        // ... (lógica inicial do webhook continua a mesma) ...
+    try {
         const leadData = req.body;
         const crmEventName = leadData.tag ? leadData.tag.name : null;
-        if (!crmEventName) return res.status(200).send('Webhook recebido, mas sem nome de evento.');
+        
+        if (!crmEventName) {
+            console.log('Webhook recebido, mas sem nome de evento válido. Nenhuma ação será tomada.');
+            return res.status(200).send('Webhook recebido, mas sem nome de evento.');
+        }
+
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
-        if (!leadData || !leadData.lead) return res.status(400).send('Dados do lead ausentes no webhook.');
+
+        if (!leadData || !leadData.lead) {
+            return res.status(400).send('Dados do lead ausentes no webhook.');
+        }
+
         const leadEmail = leadData.lead.email ? leadData.lead.email.toLowerCase() : null;
         const leadPhone = leadData.lead.phone ? leadData.lead.phone.replace(/\D/g, '') : null;
-        if (!leadEmail && !leadPhone) return res.status(400).send('E-mail ou telefone do lead ausentes no webhook.');
+        
+        if (!leadEmail && !leadPhone) {
+            return res.status(400).send('E-mail ou telefone do lead ausentes no webhook.');
+        }
+        
+        const result = await pool.query(
+            'SELECT facebook_lead_id, first_name, last_name, dob, city, estado, zip_code FROM leads WHERE email = $1 OR phone = $2',
+            [leadEmail, leadPhone]
+        );
 
-        // AQUI ESTÁ A MUDANÇA: usa pool.query em vez de client.query
-        const result = await pool.query(
-            'SELECT facebook_lead_id, first_name, last_name, dob, city, estado, zip_code FROM leads WHERE email = $1 OR phone = $2',
-            [leadEmail, leadPhone]
-        );
+        if (result.rows.length === 0) {
+            console.log('ID do Facebook não encontrado para este lead no banco de dados.');
+            return res.status(200).send('ID do Facebook não encontrado.');
+        }
 
-        if (result.rows.length === 0) {
-            return res.status(200).send('ID do Facebook não encontrado.');
-        }
-        const dbRow = result.rows[0];
-        // ... (o resto da lógica para enviar para o Facebook continua a mesma) ...
+        const dbRow = result.rows[0];
+        const facebookLeadId = dbRow.facebook_lead_id;
+        
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
+        
         const userData = {};
         if (leadEmail) userData.em = [crypto.createHash('sha256').update(leadEmail).digest('hex')];
         if (leadPhone) userData.ph = [crypto.createHash('sha256').update(leadPhone).digest('hex')];
@@ -137,17 +218,34 @@ app.post('/webhook', async (req, res) => {
         if (dbRow.city) userData.ct = [crypto.createHash('sha256').update(dbRow.city.toLowerCase()).digest('hex')];
         if (dbRow.estado) userData.st = [crypto.createHash('sha256').update(dbRow.estado.toLowerCase()).digest('hex')];
         if (dbRow.zip_code) userData.zp = [crypto.createHash('sha256').update(String(dbRow.zip_code).replace(/\D/g, '')).digest('hex')];
-        const eventData = { event_name: facebookEventName, event_time: Math.floor(Date.now() / 1000), action_source: 'system_generated', user_data: userData, custom_data: { lead_id: dbRow.facebook_lead_id, event_source: 'crm', lead_event_source: 'Your CRM' } };
+
+        const eventData = {
+            event_name: facebookEventName,
+            event_time: Math.floor(Date.now() / 1000),
+            action_source: 'system_generated',
+            user_data: userData,
+            custom_data: {
+                lead_id: facebookLeadId,
+                event_source: 'crm',
+                lead_event_source: 'Your CRM'
+            }
+        };
+
         const facebookAPIUrl = `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
-        await axios.post(facebookAPIUrl, { data: [eventData] });
-        console.log(`Evento '${facebookEventName}' disparado com sucesso para o lead com ID: ${dbRow.facebook_lead_id}`);
-        res.status(200).send('Evento de conversão enviado com sucesso!');
-    } catch (error) {
-        console.error('Erro ao processar o webhook:', error.message);
-        res.status(500).send('Erro interno do servidor.');
-    }
+        
+        await axios.post(facebookAPIUrl, {
+            data: [eventData]
+        });
+
+        console.log(`Evento '${facebookEventName}' disparado com sucesso para o lead com ID: ${facebookLeadId}`);
+        res.status(200).send('Evento de conversão enviado com sucesso!');
+
+    } catch (error) {
+        console.error('Erro ao processar o webhook:', error.message);
+        res.status(500).send('Erro interno do servidor.');
+    }
 });
 
 app.listen(port, () => {
-    console.log(`Servidor rodando na porta ${port}`);
+    console.log(`Servidor rodando na porta ${port}`);
 });
