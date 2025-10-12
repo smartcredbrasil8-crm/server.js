@@ -69,6 +69,79 @@ const initializeDatabase = async () => {
 
 initializeDatabase();
 
+// ===================================================================
+// ROTAS DE IMPORTAÇÃO RESTAURADAS
+// ===================================================================
+app.get('/importar', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Importar Leads</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+                textarea { width: 800px; height: 300px; margin-top: 20px; font-family: monospace; }
+                button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+                h1 { color: #333; }
+                p { color: #666; }
+            </style>
+        </head>
+        <body>
+            <h1>Importar Leads para o Banco de Dados</h1>
+            <p>Cole seus dados JSON aqui. Use as chaves: facebook_lead_id, first_name, last_name, phone, email, dob, city, estado, zip_code.</p>
+            <textarea id="leads-data" placeholder='[{"facebook_lead_id": "ID_FACEBOOK", "first_name": "Joao", "last_name": "Silva", "phone": "+5511987654321", "email": "email@exemplo.com", "dob": "19901231", "city": "Sao Paulo", "estado": "SP", "zip_code": "01000000"}]'></textarea><br>
+            <button onclick="importLeads()">Importar Leads</button>
+            <p id="status-message" style="margin-top: 20px; font-weight: bold;"></p>
+            <script>
+                async function importLeads() {
+                    const data = document.getElementById('leads-data').value;
+                    const statusMessage = document.getElementById('status-message');
+                    try {
+                        const response = await fetch('/import-leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data });
+                        const result = await response.text();
+                        statusMessage.textContent = result;
+                        statusMessage.style.color = 'green';
+                    } catch (error) {
+                        statusMessage.textContent = 'Erro na importação: ' + error.message;
+                        statusMessage.style.color = 'red';
+                    }
+                }
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+app.post('/import-leads', async (req, res) => {
+    const leadsToImport = req.body;
+    if (!Array.isArray(leadsToImport) || leadsToImport.length === 0) {
+        return res.status(400).send('Dados de importação ausentes ou formato inválido.');
+    }
+    try {
+        const queryText = `
+            INSERT INTO leads (facebook_lead_id, email, phone, first_name, last_name, dob, city, estado, zip_code)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (facebook_lead_id) DO UPDATE SET
+                email = EXCLUDED.email, phone = EXCLUDED.phone, first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name, dob = EXCLUDED.dob, city = EXCLUDED.city,
+                estado = EXCLUDED.estado, zip_code = EXCLUDED.zip_code;
+        `;
+        for (const lead of leadsToImport) {
+            if (!lead || typeof lead !== 'object' || !lead.facebook_lead_id) continue;
+            await pool.query(queryText, [
+                lead.facebook_lead_id, lead.email || null, (lead.phone || '').replace(/\D/g, ''),
+                lead.first_name || null, lead.last_name || null, lead.dob || null,
+                lead.city || null, lead.estado || null, lead.zip_code || null
+            ]);
+        }
+        res.status(201).send('Leads importados com sucesso!');
+    } catch (error) {
+        console.error('Erro ao importar leads:', error.message);
+        res.status(500).send('Erro interno do servidor.');
+    }
+});
+// ===================================================================
+
 // ENDPOINT DO WEBHOOK: Onde o CRM envia o evento
 app.post('/webhook', async (req, res) => {
     console.log("--- Webhook recebido ---");
@@ -111,7 +184,7 @@ app.post('/webhook', async (req, res) => {
 
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
-        if (!PIXEL_ID || !FB_ACCESS_TOKEN) {
+        if(!PIXEL_ID || !FB_ACCESS_TOKEN) {
             console.error('ERRO: Variáveis de ambiente PIXEL_ID ou FB_ACCESS_TOKEN não estão configuradas!');
             return res.status(500).send('Erro de configuração no servidor.');
         }
