@@ -7,11 +7,18 @@ const cors = require('cors');
 
 // Cria uma instância do Express
 const app = express();
+
+// Habilita CORS para aceitar requisições do seu site
 app.use(cors());
+
 const port = process.env.PORT || 10000;
 
 // Middleware para entender dados JSON
 app.use(express.json({ limit: '50mb' }));
+
+// -------------------------------------------------------------------------
+// 1. CONFIGURAÇÕES DO BANCO DE DADOS E FUNÇÕES AUXILIARES
+// -------------------------------------------------------------------------
 
 // Função para mapear o evento do CRM para o evento do Facebook
 const mapCRMEventToFacebookEvent = (crmEvent) => {
@@ -62,17 +69,21 @@ const initializeDatabase = async () => {
                 form_name TEXT,
                 platform TEXT,
                 is_organic BOOLEAN,
-                lead_status TEXT
+                lead_status TEXT,
+                fbc TEXT, 
+                fbp TEXT
             );
         `;
         await client.query(createTableQuery);
         console.log('Tabela "leads" principal verificada/criada com sucesso.');
 
+        // Adiciona colunas que podem faltar (incluindo fbc e fbp)
         const allColumns = {
             'created_time': 'BIGINT', 'email': 'TEXT', 'phone': 'TEXT', 'first_name': 'TEXT', 'last_name': 'TEXT',
             'dob': 'TEXT', 'city': 'TEXT', 'estado': 'TEXT', 'zip_code': 'TEXT', 'ad_id': 'TEXT', 'ad_name': 'TEXT',
             'adset_id': 'TEXT', 'adset_name': 'TEXT', 'campaign_id': 'TEXT', 'campaign_name': 'TEXT', 'form_id': 'TEXT',
-            'form_name': 'TEXT', 'platform': 'TEXT', 'is_organic': 'BOOLEAN', 'lead_status': 'TEXT'
+            'form_name': 'TEXT', 'platform': 'TEXT', 'is_organic': 'BOOLEAN', 'lead_status': 'TEXT',
+            'fbc': 'TEXT', 'fbp': 'TEXT'
         };
 
         for (const [columnName, columnType] of Object.entries(allColumns)) {
@@ -91,7 +102,66 @@ const initializeDatabase = async () => {
     }
 };
 
-// ROTA DE IMPORTAÇÃO (GET)
+// -------------------------------------------------------------------------
+// 2. ROTA NOVA - CAPTURA DO SITE E SALVA NO BANCO
+// -------------------------------------------------------------------------
+
+app.post('/capture-site-data', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const data = req.body;
+
+        // Logs visuais
+        console.log(' ');
+        console.log('🚀 LEAD VINDO DO SITE (SCRIPT V5)');
+        console.log(`👤 Nome: ${data.name} | 📧 Email: ${data.email} | 📱 Fone: ${data.phone}`);
+        console.log(`🍪 FBC: ${data.fbc} | FBP: ${data.fbp}`);
+
+        // Tratamento de dados para salvar
+        // Geramos um ID falso para o site pois ele não tem ID do Facebook
+        const webLeadId = `WEB-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const createdTime = Math.floor(Date.now() / 1000);
+        const email = data.email ? data.email.toLowerCase() : null;
+        const phone = data.phone ? data.phone.replace(/\D/g, '') : null;
+        
+        // Separa Nome e Sobrenome (se possível)
+        let firstName = data.name || '';
+        let lastName = '';
+        if (firstName.includes(' ')) {
+            const parts = firstName.split(' ');
+            firstName = parts[0];
+            lastName = parts.slice(1).join(' ');
+        }
+
+        // Query de Inserção (Upsert)
+        const queryText = `
+            INSERT INTO leads (facebook_lead_id, created_time, email, phone, first_name, last_name, fbc, fbp, platform, is_organic, form_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'site_smartcred', false, 'Formulario Site')
+            ON CONFLICT (facebook_lead_id) DO UPDATE SET
+                email = EXCLUDED.email,
+                phone = EXCLUDED.phone,
+                fbc = EXCLUDED.fbc,
+                fbp = EXCLUDED.fbp;
+        `;
+
+        await client.query(queryText, [
+            webLeadId, createdTime, email, phone, firstName, lastName, data.fbc, data.fbp
+        ]);
+
+        console.log('✅ Lead do site SALVO no banco de dados com sucesso!');
+        res.status(200).json({ success: true, message: "Lead salvo no banco!" });
+
+    } catch (error) {
+        console.error('❌ ERRO AO SALVAR LEAD DO SITE:', error);
+        res.status(500).json({ success: false, error: "Erro interno no servidor" });
+    } finally {
+        client.release();
+    }
+});
+
+// -------------------------------------------------------------------------
+// 3. ROTA DE IMPORTAÇÃO (GET)
+// -------------------------------------------------------------------------
 app.get('/importar', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -126,7 +196,9 @@ app.get('/importar', (req, res) => {
     `);
 });
 
-// ROTA DE IMPORTAÇÃO (POST)
+// -------------------------------------------------------------------------
+// 4. ROTA DE IMPORTAÇÃO (POST)
+// -------------------------------------------------------------------------
 app.post('/import-leads', async (req, res) => {
     const leadsToImport = req.body;
     if (!Array.isArray(leadsToImport)) { return res.status(400).send('Formato inválido.'); }
@@ -168,7 +240,9 @@ app.post('/import-leads', async (req, res) => {
     }
 });
 
-// ENDPOINT DO WEBHOOK
+// -------------------------------------------------------------------------
+// 5. ENDPOINT DO WEBHOOK (CRM -> FACEBOOK API)
+// -------------------------------------------------------------------------
 app.post('/webhook', async (req, res) => {
     console.log("--- Webhook recebido ---");
     try {
@@ -183,6 +257,7 @@ app.post('/webhook', async (req, res) => {
         const leadPhone = leadData.lead.phone ? leadData.lead.phone.replace(/\D/g, '') : null;
         if (!leadEmail && !leadPhone) { return res.status(400).send('E-mail ou telefone ausentes.'); }
 
+        // BUSCA O LEAD NO BANCO (AGORA VAI ENCONTRAR O LEAD DO SITE!)
         const result = await pool.query('SELECT * FROM leads WHERE email = $1 OR phone = $2', [leadEmail, leadPhone]);
 
         if (result.rows.length === 0) {
@@ -193,51 +268,56 @@ app.post('/webhook', async (req, res) => {
         const dbRow = result.rows[0];
         const PIXEL_ID = process.env.PIXEL_ID;
         const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN;
+        
         if (!PIXEL_ID || !FB_ACCESS_TOKEN) {
             console.error('ERRO: Variáveis de ambiente não configuradas!');
             return res.status(500).send('Erro de configuração no servidor.');
         }
 
+        // Prepara os dados do usuário (Hash SHA256)
         const userData = {};
         if (dbRow.email) userData.em = [crypto.createHash('sha256').update(dbRow.email).digest('hex')];
         if (dbRow.phone) userData.ph = [crypto.createHash('sha256').update(dbRow.phone).digest('hex')];
         if (dbRow.first_name) userData.fn = [crypto.createHash('sha256').update(dbRow.first_name.toLowerCase()).digest('hex')];
         if (dbRow.last_name) userData.ln = [crypto.createHash('sha256').update(dbRow.last_name.toLowerCase()).digest('hex')];
-        if (dbRow.dob) userData.db = [crypto.createHash('sha256').update(String(dbRow.dob).replace(/\D/g, '')).digest('hex')];
         if (dbRow.city) userData.ct = [crypto.createHash('sha256').update(dbRow.city.toLowerCase()).digest('hex')];
         if (dbRow.estado) userData.st = [crypto.createHash('sha256').update(dbRow.estado.toLowerCase()).digest('hex')];
-        if (dbRow.zip_code) userData.zp = [crypto.createHash('sha256').update(String(dbRow.zip_code).replace(/\D/g, '')).digest('hex')];
-        if (dbRow.facebook_lead_id) userData.lead_id = dbRow.facebook_lead_id;
+        
+        // *** AQUI ESTÁ O SEGREDO: ENVIA FBC E FBP SE TIVER ***
+        if (dbRow.fbc) userData.fbc = dbRow.fbc;
+        if (dbRow.fbp) userData.fbp = dbRow.fbp;
+        
+        // Se for lead do Facebook, manda o ID do Lead. Se for do site, não manda esse campo.
+        if (dbRow.facebook_lead_id && !dbRow.facebook_lead_id.startsWith('WEB-')) {
+            userData.lead_id = dbRow.facebook_lead_id;
+        }
 
-        const eventTime = (facebookEventName === 'Lead' && dbRow.created_time) ? dbRow.created_time : Math.floor(Date.now() / 1000);
+        const eventTime = Math.floor(Date.now() / 1000); // Usa o tempo atual da conversão no CRM
 
         const eventData = { 
             event_name: facebookEventName, 
             event_time: eventTime, 
-            action_source: 'system_generated', 
+            action_source: 'website', // Mudamos para website pois veio do site/crm
             user_data: userData,
             custom_data: { 
                 event_source: 'crm',
                 lead_event_source: 'Greenn Sales',
-                campaign_id: dbRow.campaign_id,
                 campaign_name: dbRow.campaign_name,
-                ad_id: dbRow.ad_id,
-                ad_name: dbRow.ad_name,
-                adset_id: dbRow.adset_id,
-                adset_name: dbRow.adset_name,
-                form_id: dbRow.form_id,
                 form_name: dbRow.form_name,
-                platform: dbRow.platform,
-                is_organic: dbRow.is_organic,
                 lead_status: dbRow.lead_status
             }
         };
         const facebookAPIUrl = `https://graph.facebook.com/v24.0/${PIXEL_ID}/events?access_token=${FB_ACCESS_TOKEN}`;
         
         console.log(`Enviando evento '${facebookEventName}' para a API do Facebook...`);
+        // await axios.post(facebookAPIUrl, { data: [eventData] }); // Descomente para enviar de verdade
+
+        console.log('PAYLOAD FACEBOOK:', JSON.stringify(eventData, null, 2));
+        console.log(`Evento '${facebookEventName}' processado para: ${dbRow.email}`);
+        
+        // Envio real (Se quiser ativar, remova o comentário do axios acima e desta linha abaixo)
         await axios.post(facebookAPIUrl, { data: [eventData] });
 
-        console.log(`Evento '${facebookEventName}' disparado com sucesso para o lead com ID: ${dbRow.facebook_lead_id}`);
         res.status(200).send('Evento de conversão enviado com sucesso!');
 
     } catch (error) {
@@ -249,7 +329,7 @@ app.post('/webhook', async (req, res) => {
 // ROTA DE TESTE E HEALTH CHECK
 app.get('/', (req, res) => {
   console.log("A rota principal (GET /) foi acessada com sucesso!");
-  res.status(200).send("Servidor no ar e respondendo.");
+  res.status(200).send("🟢 Servidor Espião V5 + Banco de Dados + Webhook ONLINE!");
 });
 
 // Função para iniciar o servidor APÓS a inicialização do banco de dados
