@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.22 - BLINDAGEM TRIPLA ANTI-DUPLICIDADE)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.23 - COM DASHBOARD VISUAL)
 // ============================================================================
 
 const express = require('express');
@@ -75,7 +75,6 @@ const initializeDatabase = async () => {
                 last_sent_event TEXT 
             );
         `;
-        // Nota: A coluna 'last_sent_event' foi adicionada acima para a Trava de Estado
         await client.query(createTableQuery);
 
         const allColumns = {
@@ -86,7 +85,7 @@ const initializeDatabase = async () => {
             'fbc': 'TEXT', 'fbp': 'TEXT',
             'client_ip_address': 'TEXT',
             'client_user_agent': 'TEXT',
-            'last_sent_event': 'TEXT' // <--- COLUNA NOVA (TRAVA 3)
+            'last_sent_event': 'TEXT'
         };
 
         for (const [columnName, columnType] of Object.entries(allColumns)) {
@@ -528,9 +527,220 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
+// 5.1 ROTA: DASHBOARD VISUAL (NOVO)
+// ============================================================================
+
+// A. Rota que serve o HTML do Dashboard
+app.get('/dashboard', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Funil | SmartCred</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+        .card { background-color: #1e293b; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-7xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-white">Monitoramento de Funil</h1>
+                <p class="text-slate-400 text-sm">Atualização em tempo real via Webhooks</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="carregarDados('hoje')" class="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white" id="btn-hoje">Hoje</button>
+                <button onclick="carregarDados('semana')" class="px-4 py-2 bg-slate-700 rounded-lg text-sm hover:bg-slate-600 transition text-white" id="btn-semana">7 Dias</button>
+                <button onclick="carregarDados('quinzena')" class="px-4 py-2 bg-slate-700 rounded-lg text-sm hover:bg-slate-600 transition text-white" id="btn-quinzena">15 Dias</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="card border-l-4 border-blue-500">
+                <h3 class="text-slate-400 text-xs uppercase tracking-wider">Total Leads</h3>
+                <p class="text-3xl font-bold text-white mt-2" id="kpi-total">0</p>
+            </div>
+            <div class="card border-l-4 border-yellow-500">
+                <h3 class="text-slate-400 text-xs uppercase tracking-wider">Atendeu</h3>
+                <p class="text-3xl font-bold text-white mt-2" id="kpi-atendeu">0</p>
+            </div>
+            <div class="card border-l-4 border-green-500">
+                <h3 class="text-slate-400 text-xs uppercase tracking-wider">Oportunidade</h3>
+                <p class="text-3xl font-bold text-white mt-2" id="kpi-oportunidade">0</p>
+            </div>
+            <div class="card border-l-4 border-purple-500">
+                <h3 class="text-slate-400 text-xs uppercase tracking-wider">Vendas</h3>
+                <p class="text-3xl font-bold text-white mt-2" id="kpi-vendas">0</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="card lg:col-span-2">
+                <h2 class="text-lg font-semibold mb-4 text-white">Distribuição do Funil</h2>
+                <div id="chart-funnel"></div>
+            </div>
+            <div class="card">
+                <h2 class="text-lg font-semibold mb-4 text-white">Share por Etapa</h2>
+                <div id="chart-donut"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chartFunnelObj = null;
+        let chartDonutObj = null;
+
+        async function carregarDados(periodo) {
+            // Atualiza botões
+            document.querySelectorAll('button').forEach(b => b.classList.replace('bg-blue-600', 'bg-slate-700'));
+            document.getElementById('btn-' + periodo).classList.replace('bg-slate-700', 'bg-blue-600');
+
+            try {
+                const res = await fetch('/api/kpis?periodo=' + periodo);
+                const data = await res.json();
+
+                // Atualiza KPIs
+                document.getElementById('kpi-total').innerText = data.total;
+                document.getElementById('kpi-atendeu').innerText = data.atendeu;
+                document.getElementById('kpi-oportunidade').innerText = data.oportunidade;
+                document.getElementById('kpi-vendas').innerText = data.vencemos;
+
+                renderCharts(data);
+            } catch (e) { console.error('Erro ao carregar dados', e); }
+        }
+
+        function renderCharts(data) {
+            // Prepara dados
+            const categories = ['Novos', 'Atendeu', 'Oportunidade', 'Vencemos', 'Desqualificado'];
+            const values = [
+                data.novos || 0,
+                data.atendeu || 0,
+                data.oportunidade || 0,
+                data.vencemos || 0,
+                data.desqualificado || 0
+            ];
+
+            // 1. Gráfico Funil (Barras)
+            const optionsFunnel = {
+                series: [{ name: 'Leads', data: values }],
+                chart: { type: 'bar', height: 350, toolbar: { show: false }, background: 'transparent' },
+                plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '50%' } },
+                dataLabels: { enabled: true },
+                xaxis: { categories: categories, labels: { style: { colors: '#cbd5e1' } } },
+                yaxis: { labels: { style: { colors: '#cbd5e1' } } },
+                colors: ['#3b82f6'],
+                grid: { borderColor: '#334155' },
+                theme: { mode: 'dark' }
+            };
+
+            // 2. Gráfico Donut
+            const optionsDonut = {
+                series: values.filter(v => v > 0),
+                labels: categories.filter((_, i) => values[i] > 0),
+                chart: { type: 'donut', height: 350, background: 'transparent' },
+                theme: { mode: 'dark' },
+                legend: { position: 'bottom' },
+                stroke: { show: false }
+            };
+
+            if (chartFunnelObj) chartFunnelObj.destroy();
+            if (chartDonutObj) chartDonutObj.destroy();
+
+            chartFunnelObj = new ApexCharts(document.querySelector("#chart-funnel"), optionsFunnel);
+            chartFunnelObj.render();
+
+            chartDonutObj = new ApexCharts(document.querySelector("#chart-donut"), optionsDonut);
+            chartDonutObj.render();
+        }
+
+        // Carregar inicial
+        carregarDados('hoje');
+    </script>
+</body>
+</html>
+    `);
+});
+
+// B. API que fornece os dados para o Dashboard
+app.get('/api/kpis', async (req, res) => {
+    const { periodo } = req.query; // 'hoje', 'semana', 'quinzena'
+    const client = await pool.connect();
+
+    try {
+        // Calcular Timestamp de Corte (Considerando Fuso -3h BRT)
+        const now = new Date();
+        now.setHours(now.getHours() - 3); // Ajuste manual para garantir BRT
+        
+        let startTimestamp = 0;
+        
+        if (periodo === 'hoje') {
+            now.setHours(0,0,0,0);
+            startTimestamp = Math.floor(now.getTime() / 1000);
+        } else if (periodo === 'semana') {
+            const sevenDaysAgo = new Date(now);
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            sevenDaysAgo.setHours(0,0,0,0);
+            startTimestamp = Math.floor(sevenDaysAgo.getTime() / 1000);
+        } else if (periodo === 'quinzena') {
+            const fifteenDaysAgo = new Date(now);
+            fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+            fifteenDaysAgo.setHours(0,0,0,0);
+            startTimestamp = Math.floor(fifteenDaysAgo.getTime() / 1000);
+        }
+
+        // Busca agregada por status
+        const queryText = `
+            SELECT last_sent_event, COUNT(*) as qtd 
+            FROM leads 
+            WHERE created_time >= $1 
+            GROUP BY last_sent_event
+        `;
+        
+        const result = await client.query(queryText, [startTimestamp]);
+        
+        // Formata para o JSON de resposta
+        const stats = {
+            total: 0,
+            novos: 0,
+            atendeu: 0,
+            oportunidade: 0,
+            vencemos: 0,
+            desqualificado: 0
+        };
+
+        result.rows.forEach(row => {
+            const status = row.last_sent_event ? row.last_sent_event.toLowerCase() : 'novos';
+            const count = parseInt(row.qtd);
+            
+            stats.total += count;
+
+            if (status.includes('lead') || status.includes('novos')) stats.novos += count;
+            else if (status.includes('atendeu')) stats.atendeu += count;
+            else if (status.includes('oportunidade')) stats.oportunidade += count;
+            else if (status.includes('vencemos') || status.includes('venda')) stats.vencemos += count;
+            else stats.desqualificado += count;
+        });
+
+        res.json(stats);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao buscar KPIs' });
+    } finally {
+        client.release();
+    }
+});
+
+
+// ============================================================================
 // 6. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.22 (Blindagem Tripla) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.23 (Blindagem Tripla) Online!'));
 
 const startServer = async () => {
     try {
