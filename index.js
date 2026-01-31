@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.28 - PERIODOS AJUSTADOS: 3/7/15/30 DIAS)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.28 - VERSÃO FINAL CORRIGIDA)
 // ============================================================================
 
 const express = require('express');
@@ -78,7 +78,6 @@ const initializeDatabase = async () => {
         `;
         await client.query(createTableQuery);
 
-        // Garante colunas críticas
         const colunasExtras = ['adset_name', 'campaign_name', 'dob', 'city', 'estado'];
         for (const col of colunasExtras) {
              const check = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='${col}'`);
@@ -95,7 +94,7 @@ const initializeDatabase = async () => {
 };
 
 // ============================================================================
-// 2. ROTA DE CAPTURA DO SITE (COM DADOS COMPLETOS)
+// 2. ROTA DE CAPTURA DO SITE
 // ============================================================================
 app.post('/capture-site-data', async (req, res) => {
     const client = await pool.connect();
@@ -321,7 +320,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.28 - PERIODOS AJUSTADOS)
+// 6. DASHBOARD ANALÍTICO
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -512,7 +511,6 @@ app.get('/dashboard', (req, res) => {
             renderTable('table-estados', data.topEstados);
         }
 
-        // CARREGA 3 DIAS POR PADRÃO
         carregarDados('tres_dias');
     </script>
 </body>
@@ -525,15 +523,14 @@ app.get('/api/kpis', async (req, res) => {
     const client = await pool.connect();
     try {
         const now = new Date();
-        now.setHours(now.getHours() - 3); // BRT
+        now.setHours(now.getHours() - 3);
         
-        // CALCULO DE DATAS DINAMICO
         let daysToSubtract = 0;
         if (periodo === 'tres_dias') daysToSubtract = 3;
         else if (periodo === 'semana') daysToSubtract = 7;
         else if (periodo === 'quinzena') daysToSubtract = 15;
         else if (periodo === 'trinta_dias') daysToSubtract = 30;
-        else daysToSubtract = 3; // Fallback
+        else daysToSubtract = 3; 
 
         const startDate = new Date(now);
         startDate.setDate(startDate.getDate() - daysToSubtract);
@@ -616,4 +613,24 @@ app.get('/api/kpis', async (req, res) => {
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({
+        res.status(500).json({ error: 'Erro ao buscar KPIs' });
+    } finally {
+        client.release();
+    }
+});
+
+// ============================================================================
+// 7. INICIALIZAÇÃO
+// ============================================================================
+app.get('/', (req, res) => res.send('🟢 Servidor V8.28 (Periodos Corrigidos) Online!'));
+
+const startServer = async () => {
+    try {
+        await initializeDatabase();
+        app.listen(port, () => console.log(`🚀 Servidor na porta ${port}`));
+    } catch (error) {
+        console.error("❌ Falha:", error);
+    }
+};
+
+startServer();
