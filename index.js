@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.35 - TODOS OS ESTADOS & PERIODOS 45/90)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.36 - CORREÇÃO CRÍTICA DE FUNIL E TABELAS)
 // ============================================================================
 
 const express = require('express');
@@ -325,7 +325,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.35 - COMPLETO + PERIODOS LONGOS)
+// 6. DASHBOARD ANALÍTICO (V8.36 - LÓGICA CUMULATIVA CORRIGIDA)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -439,8 +439,9 @@ app.get('/dashboard', (req, res) => {
                             <tr>
                                 <th class="px-4 py-3">Faixa Etária</th>
                                 <th class="px-4 py-3 text-center text-blue-400">Leads</th>
+                                <th class="px-4 py-3 text-center">Atendeu</th>
                                 <th class="px-4 py-3 text-center">Oport.</th>
-                                <th class="px-4 py-3 text-center">Avançado</th>
+                                <th class="px-4 py-3 text-center">Avanç.</th>
                                 <th class="px-4 py-3 text-center">Vídeo</th>
                                 <th class="px-4 py-3 text-center text-green-400">Vendas</th>
                             </tr>
@@ -459,8 +460,9 @@ app.get('/dashboard', (req, res) => {
                             <tr>
                                 <th class="px-4 py-3">Estado</th>
                                 <th class="px-4 py-3 text-center text-blue-400">Leads</th>
+                                <th class="px-4 py-3 text-center">Atendeu</th>
                                 <th class="px-4 py-3 text-center">Oport.</th>
-                                <th class="px-4 py-3 text-center">Avançado</th>
+                                <th class="px-4 py-3 text-center">Avanç.</th>
                                 <th class="px-4 py-3 text-center">Vídeo</th>
                                 <th class="px-4 py-3 text-center text-green-400">Vendas</th>
                             </tr>
@@ -499,6 +501,7 @@ app.get('/dashboard', (req, res) => {
 
         let chartFunnelObj = null;
         let chartCompareObj = null;
+        let chartStatesObj = null;
 
         function formatarDataNasc(raw) {
             if (!raw) return '--';
@@ -611,6 +614,7 @@ app.get('/dashboard', (req, res) => {
                 return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
                     <td class="px-4 py-3 font-medium text-white">\${row.range} anos</td>
                     <td class="px-4 py-3 text-center text-blue-400 font-bold">\${row.leads}</td>
+                    <td class="px-4 py-3 text-center">\${row.atendeu}</td>
                     <td class="px-4 py-3 text-center">\${row.oportunidade}</td>
                     <td class="px-4 py-3 text-center">\${row.avancado}</td>
                     <td class="px-4 py-3 text-center">\${row.video}</td>
@@ -627,6 +631,7 @@ app.get('/dashboard', (req, res) => {
                     return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
                         <td class="px-4 py-3 font-medium text-white">\${row.state}</td>
                         <td class="px-4 py-3 text-center text-blue-400 font-bold">\${row.leads}</td>
+                        <td class="px-4 py-3 text-center">\${row.atendeu}</td>
                         <td class="px-4 py-3 text-center">\${row.oportunidade}</td>
                         <td class="px-4 py-3 text-center">\${row.avancado}</td>
                         <td class="px-4 py-3 text-center">\${row.video}</td>
@@ -698,21 +703,30 @@ app.get('/api/kpis', async (req, res) => {
         const ageMap = {};
         const stateMap = {};
 
-        // INICIALIZA BUCKETS DE IDADE
+        // INICIALIZA BUCKETS DE IDADE (AGORA COM 'atendeu' e zerados)
         const buckets = ['20-24', '25-29', '30-39', '40-49', '50-59', '60-65'];
         buckets.forEach(b => {
-            ageMap[b] = { range: b, leads: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
+            ageMap[b] = { range: b, leads: 0, atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
         });
 
         result.rows.forEach(row => {
             stats.total++;
             
             const st = row.last_sent_event ? row.last_sent_event.toUpperCase() : '';
-            if (st === 'ATENDEU') stats.funil.atendeu++;
-            else if (st === 'OPORTUNIDADE') stats.funil.oportunidade++;
-            else if (st === 'AVANÇADO') stats.funil.avancado++;
-            else if (st === 'VÍDEO' || st === 'VIDEO') stats.funil.video++;
-            else if (st === 'VENCEMOS' || st === 'VENDA') stats.funil.vencemos++;
+            
+            // FUNIL CUMULATIVO GERAL
+            // Se está em 'Vencemos', ele também passou por todas as anteriores
+            const isVenda = (st === 'VENCEMOS' || st === 'VENDA');
+            const isVideo = (st === 'VÍDEO' || st === 'VIDEO') || isVenda;
+            const isAvancado = (st === 'AVANÇADO') || isVideo;
+            const isOportunidade = (st === 'OPORTUNIDADE') || isAvancado;
+            const isAtendeu = (st === 'ATENDEU') || isOportunidade;
+
+            if (isAtendeu) stats.funil.atendeu++;
+            if (isOportunidade) stats.funil.oportunidade++;
+            if (isAvancado) stats.funil.avancado++;
+            if (isVideo) stats.funil.video++;
+            if (isVenda) stats.funil.vencemos++;
 
             // MATRIZ (Campanha/Adset)
             const camp = row.campaign_name;
@@ -721,25 +735,26 @@ app.get('/api/kpis', async (req, res) => {
                 const key = `${camp}|${adset}`;
                 if (!matrixMap[key]) matrixMap[key] = { campaign: camp, adset: adset, leads: 0, atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vendas: 0 };
                 matrixMap[key].leads++;
-                if (st === 'ATENDEU') matrixMap[key].atendeu++;
-                if (st === 'OPORTUNIDADE') matrixMap[key].oportunidade++;
-                if (st === 'AVANÇADO') matrixMap[key].avancado++;
-                if (st === 'VÍDEO' || st === 'VIDEO') matrixMap[key].video++;
-                if (st === 'VENCEMOS' || st === 'VENDA') matrixMap[key].vendas++;
+                if (isAtendeu) matrixMap[key].atendeu++;
+                if (isOportunidade) matrixMap[key].oportunidade++;
+                if (isAvancado) matrixMap[key].avancado++;
+                if (isVideo) matrixMap[key].video++;
+                if (isVenda) matrixMap[key].vendas++;
             }
 
-            // ESTADOS (TODOS)
+            // ESTADOS (TODOS) - AGORA COM 'atendeu' INICIALIZADO CORRETAMENTE
             const uf = row.estado ? row.estado.toUpperCase() : null;
             if (uf && uf.length === 2) {
-                if (!stateMap[uf]) stateMap[uf] = { state: uf, leads: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
+                if (!stateMap[uf]) stateMap[uf] = { state: uf, leads: 0, atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
                 stateMap[uf].leads++;
-                if (st === 'OPORTUNIDADE') stateMap[uf].oportunidade++;
-                if (st === 'AVANÇADO') stateMap[uf].avancado++;
-                if (st === 'VÍDEO' || st === 'VIDEO') stateMap[uf].video++;
-                if (st === 'VENCEMOS' || st === 'VENDA') stateMap[uf].vencemos++;
+                if (isAtendeu) stateMap[uf].atendeu++;
+                if (isOportunidade) stateMap[uf].oportunidade++;
+                if (isAvancado) stateMap[uf].avancado++;
+                if (isVideo) stateMap[uf].video++;
+                if (isVenda) stateMap[uf].vencemos++;
             }
 
-            // IDADES
+            // IDADES (TODOS)
             if (row.dob) {
                 let anoNasc = 0;
                 let dobStr = String(row.dob).replace(/\D/g, ''); 
@@ -760,10 +775,11 @@ app.get('/api/kpis', async (req, res) => {
                         else b = '60-65';
 
                         ageMap[b].leads++;
-                        if (st === 'OPORTUNIDADE') ageMap[b].oportunidade++;
-                        if (st === 'AVANÇADO') ageMap[b].avancado++;
-                        if (st === 'VÍDEO' || st === 'VIDEO') ageMap[b].video++;
-                        if (st === 'VENCEMOS' || st === 'VENDA') ageMap[b].vencemos++;
+                        if (isAtendeu) ageMap[b].atendeu++;
+                        if (isOportunidade) ageMap[b].oportunidade++;
+                        if (isAvancado) ageMap[b].avancado++;
+                        if (isVideo) ageMap[b].video++;
+                        if (isVenda) ageMap[b].vencemos++;
                     }
                 }
             }
@@ -805,7 +821,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.35 (Todos Estados + 45/90d) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.36 (Correção Final) Online!'));
 
 const startServer = async () => {
     try {
