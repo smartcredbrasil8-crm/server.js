@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.32 - TOP 7, GEOGRAFIA & FILTRO RÍGIDO)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.33 - RANKING DE IDADE TOP 4)
 // ============================================================================
 
 const express = require('express');
@@ -325,7 +325,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.32 - BI FINAL)
+// 6. DASHBOARD ANALÍTICO (V8.33 - RANKING IDADE TOP 4)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -428,13 +428,12 @@ app.get('/dashboard', (req, res) => {
         </div>
 
         <div class="card">
-            <div class="flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-white">📋 Resumo Demográfico Recente</h2>
-            </div>
-            <div class="mt-4 p-6 bg-slate-800/50 rounded-lg flex flex-col items-center justify-center border border-slate-700 border-dashed">
-                <p class="text-slate-400 mb-2 uppercase text-xs tracking-wider font-bold">Faixa Etária Predominante (20-65 anos)</p>
-                <p class="text-3xl text-white font-medium" id="kpi-faixa-etaria">Aguardando dados...</p>
-                <p class="text-xs text-slate-500 mt-2">Baseado nos últimos leads válidos</p>
+            <h2 class="text-lg font-semibold text-white mb-4">🏆 Faixa Etária Predominante (Top 4)</h2>
+            <div class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
+                <ul id="list-idades" class="space-y-4">
+                    <li class="text-slate-400 text-center text-sm">Aguardando dados...</li>
+                </ul>
+                <p class="text-xs text-slate-500 mt-4 text-center">Considerando apenas leads entre 20 e 65 anos</p>
             </div>
         </div>
 
@@ -476,12 +475,33 @@ app.get('/dashboard', (req, res) => {
             document.getElementById('kpi-oportunidade').innerText = data.funil.oportunidade;
             document.getElementById('kpi-vendas').innerText = data.funil.vencemos;
             
-            // FAIXA ETARIA TEXTUAL
-            const elFaixa = document.getElementById('kpi-faixa-etaria');
-            if (data.idadeMin > 0 && data.idadeMax > 0) {
-                elFaixa.innerText = \`Idade dos leads entre \${data.idadeMin} a \${data.idadeMax} anos\`;
+            // RANKING DE IDADE (TOP 4)
+            const elList = document.getElementById('list-idades');
+            if (data.topIdades && data.topIdades.length > 0) {
+                let html = '';
+                const emojis = ['🥇', '🥈', '🥉', '4.'];
+                data.topIdades.forEach((item, index) => {
+                    const icon = emojis[index] || (index + 1) + '.';
+                    // Calcula a porcentagem para a barra de progresso visual
+                    const percent = Math.round((item.count / data.total) * 100); 
+                    
+                    html += \`
+                    <li class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">\${icon}</span>
+                            <div class="flex flex-col">
+                                <span class="text-white font-medium text-lg">\${item.count} leads</span>
+                                <span class="text-slate-400 text-sm">entre <span class="text-indigo-400 font-bold">\${item.range} anos</span></span>
+                            </div>
+                        </div>
+                        <div class="w-24 bg-slate-700 rounded-full h-2">
+                            <div class="bg-indigo-500 h-2 rounded-full" style="width: \${percent}%"></div>
+                        </div>
+                    </li>\`;
+                });
+                elList.innerHTML = html;
             } else {
-                elFaixa.innerText = "Aguardando dados demográficos...";
+                elList.innerHTML = '<li class="text-slate-400 text-center text-sm py-4">Nenhum dado demográfico disponível no período.</li>';
             }
 
             // 1. Gráfico Funil
@@ -500,7 +520,7 @@ app.get('/dashboard', (req, res) => {
             });
             chartFunnelObj.render();
 
-            // 2. Gráfico Comparativo (TOP 7 Campanhas)
+            // 2. Gráfico Comparativo
             const campNames = data.topCampanhas.map(c => c.nome.substring(0, 15));
             const campLeads = data.topCampanhas.map(c => c.leads);
             const campVendas = data.topCampanhas.map(c => c.vendas);
@@ -517,7 +537,7 @@ app.get('/dashboard', (req, res) => {
             });
             chartCompareObj.render();
 
-            // 3. NOVO Gráfico Estados (TOP 7)
+            // 3. Gráfico Estados
             const stateNames = data.topEstados.map(e => e.nome);
             const stateVals = data.topEstados.map(e => e.qtd);
 
@@ -533,7 +553,7 @@ app.get('/dashboard', (req, res) => {
             });
             chartStatesObj.render();
 
-            // 4. Tabela Matriz EXPANDIDA
+            // 4. Tabela Matriz
             const tbodyMatrix = document.getElementById('table-matrix');
             tbodyMatrix.innerHTML = data.matrix.map(row => {
                 const conv = row.leads > 0 ? ((row.vendas / row.leads) * 100).toFixed(1) + '%' : '0.0%';
@@ -589,13 +609,12 @@ app.get('/api/kpis', async (req, res) => {
             matrix: [], 
             topCampanhas: [], 
             topEstados: [],
-            idadeMin: 0,
-            idadeMax: 0
+            topIdades: [] // Array para o Ranking
         };
 
         const matrixMap = {}; 
         const estadosMap = {};
-        let idadesValidas = [];
+        const ageBuckets = {}; // Acumulador de idades
 
         result.rows.forEach(row => {
             stats.total++;
@@ -607,7 +626,6 @@ app.get('/api/kpis', async (req, res) => {
             else if (st === 'VÍDEO' || st === 'VIDEO') stats.funil.video++;
             else if (st === 'VENCEMOS' || st === 'VENDA') stats.funil.vencemos++;
 
-            // FILTRO DE CAMPANHA (IGNORA SE FOR NULO OU 'SEM CAMPANHA')
             const camp = row.campaign_name;
             const adset = row.adset_name || 'Geral';
             
@@ -627,13 +645,12 @@ app.get('/api/kpis', async (req, res) => {
                 if (st === 'VENCEMOS' || st === 'VENDA') matrixMap[key].vendas++;
             }
 
-            // FILTRO DE ESTADOS
             const uf = row.estado ? row.estado.toUpperCase() : null;
             if (uf && uf.length === 2) {
                 estadosMap[uf] = (estadosMap[uf] || 0) + 1;
             }
 
-            // CALCULO IDADE (20-65)
+            // CALCULO IDADE E BUCKETING
             if (row.dob) {
                 let anoNasc = 0;
                 let dobStr = String(row.dob).replace(/\D/g, ''); 
@@ -645,13 +662,23 @@ app.get('/api/kpis', async (req, res) => {
                 if (anoNasc > 1900 && anoNasc < new Date().getFullYear()) {
                     const idade = new Date().getFullYear() - anoNasc;
                     if (idade >= 20 && idade <= 65) {
-                        idadesValidas.push(idade);
+                        // Define o Bucket
+                        let bucket = '';
+                        if (idade <= 24) bucket = '20-24';
+                        else if (idade <= 29) bucket = '25-29';
+                        else if (idade <= 39) bucket = '30-39';
+                        else if (idade <= 49) bucket = '40-49';
+                        else if (idade <= 59) bucket = '50-59';
+                        else bucket = '60-65';
+
+                        if (!ageBuckets[bucket]) ageBuckets[bucket] = 0;
+                        ageBuckets[bucket]++;
                     }
                 }
             }
         });
 
-        // Processa Rankings (TOP 7)
+        // Finaliza os Rankings
         stats.matrix = Object.values(matrixMap).sort((a, b) => b.leads - a.leads);
         
         const campAgg = {};
@@ -667,10 +694,11 @@ app.get('/api/kpis', async (req, res) => {
             .sort((a, b) => b.qtd - a.qtd)
             .slice(0, 7);
 
-        if (idadesValidas.length > 0) {
-            stats.idadeMin = Math.min(...idadesValidas);
-            stats.idadeMax = Math.max(...idadesValidas);
-        }
+        // Processa o Ranking de Idade
+        stats.topIdades = Object.entries(ageBuckets)
+            .map(([range, count]) => ({ range, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 4);
 
         res.json(stats);
 
@@ -685,7 +713,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.32 (BI Final) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.33 (Ranking Idade Top 4) Online!'));
 
 const startServer = async () => {
     try {
