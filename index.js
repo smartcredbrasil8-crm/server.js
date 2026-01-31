@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.34 - TABELAS CRUZADAS IDADE & ESTADO)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.35 - TODOS OS ESTADOS & PERIODOS 45/90)
 // ============================================================================
 
 const express = require('express');
@@ -325,7 +325,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.34 - TABELAS DE IDADE E ESTADO)
+// 6. DASHBOARD ANALÍTICO (V8.35 - COMPLETO + PERIODOS LONGOS)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -361,10 +361,12 @@ app.get('/dashboard', (req, res) => {
                 <p class="text-slate-400 text-sm mt-1">Inteligência de Tráfego e Vendas</p>
             </div>
             <div class="flex gap-2 bg-slate-800 p-1 rounded-lg overflow-x-auto">
-                <button onclick="carregarDados('tres_dias')" class="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white shadow-lg whitespace-nowrap" id="btn-tres_dias">3 Dias</button>
-                <button onclick="carregarDados('semana')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-semana">7 Dias</button>
-                <button onclick="carregarDados('quinzena')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-quinzena">15 Dias</button>
-                <button onclick="carregarDados('trinta_dias')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-trinta_dias">30 Dias</button>
+                <button onclick="carregarDados('tres_dias')" class="px-3 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white shadow-lg whitespace-nowrap" id="btn-tres_dias">3D</button>
+                <button onclick="carregarDados('semana')" class="px-3 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-semana">7D</button>
+                <button onclick="carregarDados('quinzena')" class="px-3 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-quinzena">15D</button>
+                <button onclick="carregarDados('trinta_dias')" class="px-3 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-trinta_dias">30D</button>
+                <button onclick="carregarDados('quarenta_cinco_dias')" class="px-3 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-quarenta_cinco_dias">45D</button>
+                <button onclick="carregarDados('noventa_dias')" class="px-3 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-noventa_dias">90D</button>
             </div>
         </div>
 
@@ -398,6 +400,13 @@ app.get('/dashboard', (req, res) => {
             </div>
         </div>
         
+        <div class="grid grid-cols-1 gap-6 mb-8">
+             <div class="card">
+                <h2 class="text-lg font-semibold mb-2 text-white">Top 7 Estados (UF)</h2>
+                <div id="chart-states"></div>
+            </div>
+        </div>
+
         <div class="card mb-8">
             <h2 class="text-xl font-bold text-white mb-4 border-b border-slate-700 pb-3">🚀 Matriz de Performance (Funil por Conjunto)</h2>
             <div class="overflow-x-auto scroll-custom max-h-96">
@@ -412,6 +421,7 @@ app.get('/dashboard', (req, res) => {
                             <th class="px-4 py-3 text-center">Avançado</th>
                             <th class="px-4 py-3 text-center">Vídeo</th>
                             <th class="px-4 py-3 text-center font-bold text-green-400">Vendas</th>
+                            <th class="px-4 py-3 text-center">Conv. %</th>
                         </tr>
                     </thead>
                     <tbody id="table-matrix"></tbody>
@@ -442,7 +452,7 @@ app.get('/dashboard', (req, res) => {
             </div>
 
             <div class="card">
-                <h2 class="text-lg font-semibold text-white mb-4">🗺️ Estados vs. Qualidade (>10 Leads)</h2>
+                <h2 class="text-lg font-semibold text-white mb-4">🗺️ Estados vs. Qualidade (Todos)</h2>
                 <div class="overflow-x-auto scroll-custom max-h-80">
                     <table class="w-full text-sm text-left text-slate-300">
                         <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
@@ -503,7 +513,7 @@ app.get('/dashboard', (req, res) => {
         }
 
         async function carregarDados(periodo) {
-            ['tres_dias', 'semana', 'quinzena', 'trinta_dias'].forEach(p => {
+            ['tres_dias', 'semana', 'quinzena', 'trinta_dias', 'quarenta_cinco_dias', 'noventa_dias'].forEach(p => {
                 const btn = document.getElementById('btn-' + p);
                 if (btn) {
                     if(p === periodo) {
@@ -562,9 +572,26 @@ app.get('/dashboard', (req, res) => {
             });
             chartCompareObj.render();
 
-            // 3. Tabela Matriz
+            // 3. Gráfico Estados
+            const stateNames = data.topEstados.map(e => e.nome);
+            const stateVals = data.topEstados.map(e => e.qtd);
+
+            if (chartStatesObj) chartStatesObj.destroy();
+            chartStatesObj = new ApexCharts(document.querySelector("#chart-states"), {
+                series: [{ name: 'Leads', data: stateVals }],
+                chart: { type: 'bar', height: 250 },
+                colors: ['#8b5cf6'],
+                xaxis: { categories: stateNames, labels: { style: { colors: '#cbd5e1' } } },
+                yaxis: { labels: { style: { colors: '#cbd5e1' } } },
+                legend: { show: false },
+                plotOptions: { bar: { borderRadius: 4, columnWidth: '40%' } }
+            });
+            chartStatesObj.render();
+
+            // 4. Tabela Matriz
             const tbodyMatrix = document.getElementById('table-matrix');
             tbodyMatrix.innerHTML = data.matrix.map(row => {
+                const conv = row.leads > 0 ? ((row.vendas / row.leads) * 100).toFixed(1) + '%' : '0.0%';
                 return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
                     <td class="px-4 py-3 font-medium text-white">\${row.campaign}</td>
                     <td class="px-4 py-3 text-slate-400">\${row.adset}</td>
@@ -574,10 +601,11 @@ app.get('/dashboard', (req, res) => {
                     <td class="px-4 py-3 text-center">\${row.avancado}</td>
                     <td class="px-4 py-3 text-center">\${row.video}</td>
                     <td class="px-4 py-3 text-center text-green-400 font-bold">\${row.vendas}</td>
+                    <td class="px-4 py-3 text-center text-xs">\${conv}</td>
                 </tr>\`;
             }).join('');
 
-            // 4. Tabela Idade Cruzada
+            // 5. Tabela Idade Cruzada
             const tbodyAge = document.getElementById('table-age');
             tbodyAge.innerHTML = data.ageData.map(row => {
                 return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
@@ -590,10 +618,10 @@ app.get('/dashboard', (req, res) => {
                 </tr>\`;
             }).join('');
 
-            // 5. Tabela Estados Cruzada
+            // 6. Tabela Estados Cruzada (SEM FILTRO)
             const tbodyStates = document.getElementById('table-states');
             if(data.stateData.length === 0) {
-                tbodyStates.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-500">Nenhum estado com mais de 10 leads.</td></tr>';
+                tbodyStates.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-500">Nenhum estado.</td></tr>';
             } else {
                 tbodyStates.innerHTML = data.stateData.map(row => {
                     return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
@@ -607,7 +635,7 @@ app.get('/dashboard', (req, res) => {
                 }).join('');
             }
 
-            // 6. Tabela Leads Recentes
+            // 7. Tabela Leads Recentes
             const tbodyLeads = document.getElementById('table-leads');
             tbodyLeads.innerHTML = data.recentLeads.map(l => {
                 const date = new Date(Number(l.created_time) * 1000).toLocaleDateString('pt-BR');
@@ -640,6 +668,8 @@ app.get('/api/kpis', async (req, res) => {
         if (periodo === 'semana') daysToSubtract = 7;
         else if (periodo === 'quinzena') daysToSubtract = 15;
         else if (periodo === 'trinta_dias') daysToSubtract = 30;
+        else if (periodo === 'quarenta_cinco_dias') daysToSubtract = 45;
+        else if (periodo === 'noventa_dias') daysToSubtract = 90;
 
         const startDate = new Date(now);
         startDate.setDate(startDate.getDate() - daysToSubtract);
@@ -698,7 +728,7 @@ app.get('/api/kpis', async (req, res) => {
                 if (st === 'VENCEMOS' || st === 'VENDA') matrixMap[key].vendas++;
             }
 
-            // ESTADOS
+            // ESTADOS (TODOS)
             const uf = row.estado ? row.estado.toUpperCase() : null;
             if (uf && uf.length === 2) {
                 if (!stateMap[uf]) stateMap[uf] = { state: uf, leads: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
@@ -750,12 +780,16 @@ app.get('/api/kpis', async (req, res) => {
         });
         stats.topCampanhas = Object.values(campAgg).sort((a, b) => b.leads - a.leads).slice(0, 7);
 
-        // Processa Estados (>10 leads)
+        stats.topEstados = Object.entries(stateMap)
+            .map(([nome, obj]) => ({ nome, qtd: obj.leads }))
+            .sort((a, b) => b.qtd - a.qtd)
+            .slice(0, 7); // Gráfico mantém top 7 para não poluir
+
+        // Tabela Estados (TODOS)
         stats.stateData = Object.values(stateMap)
-            .filter(s => s.leads > 10)
             .sort((a, b) => b.leads - a.leads);
 
-        // Processa Idades (Remove vazios se quiser, ou mantém todos)
+        // Processa Idades (Remove vazios)
         stats.ageData = Object.values(ageMap).filter(a => a.leads > 0);
 
         res.json(stats);
@@ -771,7 +805,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.34 (Cruzamento Completo) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.35 (Todos Estados + 45/90d) Online!'));
 
 const startServer = async () => {
     try {
