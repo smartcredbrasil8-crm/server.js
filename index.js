@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.33 - RANKING DE IDADE TOP 4)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.34 - TABELAS CRUZADAS IDADE & ESTADO)
 // ============================================================================
 
 const express = require('express');
@@ -325,7 +325,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.33 - RANKING IDADE TOP 4)
+// 6. DASHBOARD ANALÍTICO (V8.34 - TABELAS DE IDADE E ESTADO)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -398,13 +398,6 @@ app.get('/dashboard', (req, res) => {
             </div>
         </div>
         
-        <div class="grid grid-cols-1 gap-6 mb-8">
-             <div class="card">
-                <h2 class="text-lg font-semibold mb-2 text-white">Top 7 Estados (UF)</h2>
-                <div id="chart-states"></div>
-            </div>
-        </div>
-
         <div class="card mb-8">
             <h2 class="text-xl font-bold text-white mb-4 border-b border-slate-700 pb-3">🚀 Matriz de Performance (Funil por Conjunto)</h2>
             <div class="overflow-x-auto scroll-custom max-h-96">
@@ -419,7 +412,6 @@ app.get('/dashboard', (req, res) => {
                             <th class="px-4 py-3 text-center">Avançado</th>
                             <th class="px-4 py-3 text-center">Vídeo</th>
                             <th class="px-4 py-3 text-center font-bold text-green-400">Vendas</th>
-                            <th class="px-4 py-3 text-center">Conv. %</th>
                         </tr>
                     </thead>
                     <tbody id="table-matrix"></tbody>
@@ -427,13 +419,64 @@ app.get('/dashboard', (req, res) => {
             </div>
         </div>
 
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            
+            <div class="card">
+                <h2 class="text-lg font-semibold text-white mb-4">🏆 Faixa Etária vs. Qualidade</h2>
+                <div class="overflow-x-auto scroll-custom max-h-80">
+                    <table class="w-full text-sm text-left text-slate-300">
+                        <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3">Faixa Etária</th>
+                                <th class="px-4 py-3 text-center text-blue-400">Leads</th>
+                                <th class="px-4 py-3 text-center">Oport.</th>
+                                <th class="px-4 py-3 text-center">Avançado</th>
+                                <th class="px-4 py-3 text-center">Vídeo</th>
+                                <th class="px-4 py-3 text-center text-green-400">Vendas</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-age"></tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-2 text-center">Apenas 20 a 65 anos</p>
+            </div>
+
+            <div class="card">
+                <h2 class="text-lg font-semibold text-white mb-4">🗺️ Estados vs. Qualidade (>10 Leads)</h2>
+                <div class="overflow-x-auto scroll-custom max-h-80">
+                    <table class="w-full text-sm text-left text-slate-300">
+                        <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3">Estado</th>
+                                <th class="px-4 py-3 text-center text-blue-400">Leads</th>
+                                <th class="px-4 py-3 text-center">Oport.</th>
+                                <th class="px-4 py-3 text-center">Avançado</th>
+                                <th class="px-4 py-3 text-center">Vídeo</th>
+                                <th class="px-4 py-3 text-center text-green-400">Vendas</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-states"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
         <div class="card">
-            <h2 class="text-lg font-semibold text-white mb-4">🏆 Faixa Etária Predominante (Top 4)</h2>
-            <div class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
-                <ul id="list-idades" class="space-y-4">
-                    <li class="text-slate-400 text-center text-sm">Aguardando dados...</li>
-                </ul>
-                <p class="text-xs text-slate-500 mt-4 text-center">Considerando apenas leads entre 20 e 65 anos</p>
+            <h2 class="text-lg font-semibold mb-4 text-white">📋 Últimos 50 Leads (Conferência)</h2>
+            <div class="overflow-x-auto scroll-custom max-h-80">
+                <table class="w-full text-sm text-left text-slate-300">
+                    <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-3">Data</th>
+                            <th class="px-4 py-3">Nome</th>
+                            <th class="px-4 py-3">Nascimento</th>
+                            <th class="px-4 py-3">Campanha</th>
+                            <th class="px-4 py-3">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-leads"></tbody>
+                </table>
             </div>
         </div>
 
@@ -446,7 +489,18 @@ app.get('/dashboard', (req, res) => {
 
         let chartFunnelObj = null;
         let chartCompareObj = null;
-        let chartStatesObj = null;
+
+        function formatarDataNasc(raw) {
+            if (!raw) return '--';
+            const s = String(raw).replace(/\D/g, ''); 
+            if (s.length === 8) {
+                const y = s.substring(0, 4);
+                const m = s.substring(4, 6);
+                const d = s.substring(6, 8);
+                return \`\${d}/\${m}/\${y}\`;
+            }
+            return raw; 
+        }
 
         async function carregarDados(periodo) {
             ['tres_dias', 'semana', 'quinzena', 'trinta_dias'].forEach(p => {
@@ -475,35 +529,6 @@ app.get('/dashboard', (req, res) => {
             document.getElementById('kpi-oportunidade').innerText = data.funil.oportunidade;
             document.getElementById('kpi-vendas').innerText = data.funil.vencemos;
             
-            // RANKING DE IDADE (TOP 4)
-            const elList = document.getElementById('list-idades');
-            if (data.topIdades && data.topIdades.length > 0) {
-                let html = '';
-                const emojis = ['🥇', '🥈', '🥉', '4.'];
-                data.topIdades.forEach((item, index) => {
-                    const icon = emojis[index] || (index + 1) + '.';
-                    // Calcula a porcentagem para a barra de progresso visual
-                    const percent = Math.round((item.count / data.total) * 100); 
-                    
-                    html += \`
-                    <li class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <span class="text-xl">\${icon}</span>
-                            <div class="flex flex-col">
-                                <span class="text-white font-medium text-lg">\${item.count} leads</span>
-                                <span class="text-slate-400 text-sm">entre <span class="text-indigo-400 font-bold">\${item.range} anos</span></span>
-                            </div>
-                        </div>
-                        <div class="w-24 bg-slate-700 rounded-full h-2">
-                            <div class="bg-indigo-500 h-2 rounded-full" style="width: \${percent}%"></div>
-                        </div>
-                    </li>\`;
-                });
-                elList.innerHTML = html;
-            } else {
-                elList.innerHTML = '<li class="text-slate-400 text-center text-sm py-4">Nenhum dado demográfico disponível no período.</li>';
-            }
-
             // 1. Gráfico Funil
             const categoriesFunnel = ['Novos', 'Atendeu', 'Oportunidade', 'Avançado', 'Vídeo', 'Vencemos'];
             const seriesFunnel = [data.total, data.funil.atendeu, data.funil.oportunidade, data.funil.avancado, data.funil.video, data.funil.vencemos];
@@ -537,26 +562,9 @@ app.get('/dashboard', (req, res) => {
             });
             chartCompareObj.render();
 
-            // 3. Gráfico Estados
-            const stateNames = data.topEstados.map(e => e.nome);
-            const stateVals = data.topEstados.map(e => e.qtd);
-
-            if (chartStatesObj) chartStatesObj.destroy();
-            chartStatesObj = new ApexCharts(document.querySelector("#chart-states"), {
-                series: [{ name: 'Leads', data: stateVals }],
-                chart: { type: 'bar', height: 250 },
-                colors: ['#8b5cf6'],
-                xaxis: { categories: stateNames, labels: { style: { colors: '#cbd5e1' } } },
-                yaxis: { labels: { style: { colors: '#cbd5e1' } } },
-                legend: { show: false },
-                plotOptions: { bar: { borderRadius: 4, columnWidth: '40%' } }
-            });
-            chartStatesObj.render();
-
-            // 4. Tabela Matriz
+            // 3. Tabela Matriz
             const tbodyMatrix = document.getElementById('table-matrix');
             tbodyMatrix.innerHTML = data.matrix.map(row => {
-                const conv = row.leads > 0 ? ((row.vendas / row.leads) * 100).toFixed(1) + '%' : '0.0%';
                 return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
                     <td class="px-4 py-3 font-medium text-white">\${row.campaign}</td>
                     <td class="px-4 py-3 text-slate-400">\${row.adset}</td>
@@ -566,7 +574,50 @@ app.get('/dashboard', (req, res) => {
                     <td class="px-4 py-3 text-center">\${row.avancado}</td>
                     <td class="px-4 py-3 text-center">\${row.video}</td>
                     <td class="px-4 py-3 text-center text-green-400 font-bold">\${row.vendas}</td>
-                    <td class="px-4 py-3 text-center text-xs">\${conv}</td>
+                </tr>\`;
+            }).join('');
+
+            // 4. Tabela Idade Cruzada
+            const tbodyAge = document.getElementById('table-age');
+            tbodyAge.innerHTML = data.ageData.map(row => {
+                return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
+                    <td class="px-4 py-3 font-medium text-white">\${row.range} anos</td>
+                    <td class="px-4 py-3 text-center text-blue-400 font-bold">\${row.leads}</td>
+                    <td class="px-4 py-3 text-center">\${row.oportunidade}</td>
+                    <td class="px-4 py-3 text-center">\${row.avancado}</td>
+                    <td class="px-4 py-3 text-center">\${row.video}</td>
+                    <td class="px-4 py-3 text-center text-green-400 font-bold">\${row.vencemos}</td>
+                </tr>\`;
+            }).join('');
+
+            // 5. Tabela Estados Cruzada
+            const tbodyStates = document.getElementById('table-states');
+            if(data.stateData.length === 0) {
+                tbodyStates.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-500">Nenhum estado com mais de 10 leads.</td></tr>';
+            } else {
+                tbodyStates.innerHTML = data.stateData.map(row => {
+                    return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
+                        <td class="px-4 py-3 font-medium text-white">\${row.state}</td>
+                        <td class="px-4 py-3 text-center text-blue-400 font-bold">\${row.leads}</td>
+                        <td class="px-4 py-3 text-center">\${row.oportunidade}</td>
+                        <td class="px-4 py-3 text-center">\${row.avancado}</td>
+                        <td class="px-4 py-3 text-center">\${row.video}</td>
+                        <td class="px-4 py-3 text-center text-green-400 font-bold">\${row.vencemos}</td>
+                    </tr>\`;
+                }).join('');
+            }
+
+            // 6. Tabela Leads Recentes
+            const tbodyLeads = document.getElementById('table-leads');
+            tbodyLeads.innerHTML = data.recentLeads.map(l => {
+                const date = new Date(Number(l.created_time) * 1000).toLocaleDateString('pt-BR');
+                const dobFormatado = formatarDataNasc(l.dob);
+                return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
+                    <td class="px-4 py-3 text-slate-400 text-xs">\${date}</td>
+                    <td class="px-4 py-3 text-white">\${l.first_name}</td>
+                    <td class="px-4 py-3 text-yellow-400">\${dobFormatado}</td>
+                    <td class="px-4 py-3 text-xs text-slate-400">\${l.campaign_name || '-'}</td>
+                    <td class="px-4 py-3 text-xs">\${l.last_sent_event || 'Novo'}</td>
                 </tr>\`;
             }).join('');
         }
@@ -596,7 +647,7 @@ app.get('/api/kpis', async (req, res) => {
         const startTimestamp = Math.floor(startDate.getTime() / 1000);
 
         const queryText = `
-            SELECT facebook_lead_id, last_sent_event, campaign_name, adset_name, dob, estado
+            SELECT facebook_lead_id, last_sent_event, campaign_name, adset_name, dob, estado, first_name, created_time
             FROM leads 
             WHERE created_time >= $1
             ORDER BY created_time DESC
@@ -608,13 +659,20 @@ app.get('/api/kpis', async (req, res) => {
             funil: { atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 },
             matrix: [], 
             topCampanhas: [], 
-            topEstados: [],
-            topIdades: [] // Array para o Ranking
+            recentLeads: result.rows.slice(0, 50),
+            ageData: [],
+            stateData: []
         };
 
         const matrixMap = {}; 
-        const estadosMap = {};
-        const ageBuckets = {}; // Acumulador de idades
+        const ageMap = {};
+        const stateMap = {};
+
+        // INICIALIZA BUCKETS DE IDADE
+        const buckets = ['20-24', '25-29', '30-39', '40-49', '50-59', '60-65'];
+        buckets.forEach(b => {
+            ageMap[b] = { range: b, leads: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
+        });
 
         result.rows.forEach(row => {
             stats.total++;
@@ -626,17 +684,12 @@ app.get('/api/kpis', async (req, res) => {
             else if (st === 'VÍDEO' || st === 'VIDEO') stats.funil.video++;
             else if (st === 'VENCEMOS' || st === 'VENDA') stats.funil.vencemos++;
 
+            // MATRIZ (Campanha/Adset)
             const camp = row.campaign_name;
             const adset = row.adset_name || 'Geral';
-            
             if (camp && camp.toUpperCase() !== 'SEM CAMPANHA') {
                 const key = `${camp}|${adset}`;
-                if (!matrixMap[key]) {
-                    matrixMap[key] = { 
-                        campaign: camp, adset: adset, leads: 0, 
-                        atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vendas: 0 
-                    };
-                }
+                if (!matrixMap[key]) matrixMap[key] = { campaign: camp, adset: adset, leads: 0, atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vendas: 0 };
                 matrixMap[key].leads++;
                 if (st === 'ATENDEU') matrixMap[key].atendeu++;
                 if (st === 'OPORTUNIDADE') matrixMap[key].oportunidade++;
@@ -645,12 +698,18 @@ app.get('/api/kpis', async (req, res) => {
                 if (st === 'VENCEMOS' || st === 'VENDA') matrixMap[key].vendas++;
             }
 
+            // ESTADOS
             const uf = row.estado ? row.estado.toUpperCase() : null;
             if (uf && uf.length === 2) {
-                estadosMap[uf] = (estadosMap[uf] || 0) + 1;
+                if (!stateMap[uf]) stateMap[uf] = { state: uf, leads: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 };
+                stateMap[uf].leads++;
+                if (st === 'OPORTUNIDADE') stateMap[uf].oportunidade++;
+                if (st === 'AVANÇADO') stateMap[uf].avancado++;
+                if (st === 'VÍDEO' || st === 'VIDEO') stateMap[uf].video++;
+                if (st === 'VENCEMOS' || st === 'VENDA') stateMap[uf].vencemos++;
             }
 
-            // CALCULO IDADE E BUCKETING
+            // IDADES
             if (row.dob) {
                 let anoNasc = 0;
                 let dobStr = String(row.dob).replace(/\D/g, ''); 
@@ -662,23 +721,25 @@ app.get('/api/kpis', async (req, res) => {
                 if (anoNasc > 1900 && anoNasc < new Date().getFullYear()) {
                     const idade = new Date().getFullYear() - anoNasc;
                     if (idade >= 20 && idade <= 65) {
-                        // Define o Bucket
-                        let bucket = '';
-                        if (idade <= 24) bucket = '20-24';
-                        else if (idade <= 29) bucket = '25-29';
-                        else if (idade <= 39) bucket = '30-39';
-                        else if (idade <= 49) bucket = '40-49';
-                        else if (idade <= 59) bucket = '50-59';
-                        else bucket = '60-65';
+                        let b = '';
+                        if (idade <= 24) b = '20-24';
+                        else if (idade <= 29) b = '25-29';
+                        else if (idade <= 39) b = '30-39';
+                        else if (idade <= 49) b = '40-49';
+                        else if (idade <= 59) b = '50-59';
+                        else b = '60-65';
 
-                        if (!ageBuckets[bucket]) ageBuckets[bucket] = 0;
-                        ageBuckets[bucket]++;
+                        ageMap[b].leads++;
+                        if (st === 'OPORTUNIDADE') ageMap[b].oportunidade++;
+                        if (st === 'AVANÇADO') ageMap[b].avancado++;
+                        if (st === 'VÍDEO' || st === 'VIDEO') ageMap[b].video++;
+                        if (st === 'VENCEMOS' || st === 'VENDA') ageMap[b].vencemos++;
                     }
                 }
             }
         });
 
-        // Finaliza os Rankings
+        // FINALIZA RANKINGS
         stats.matrix = Object.values(matrixMap).sort((a, b) => b.leads - a.leads);
         
         const campAgg = {};
@@ -689,16 +750,13 @@ app.get('/api/kpis', async (req, res) => {
         });
         stats.topCampanhas = Object.values(campAgg).sort((a, b) => b.leads - a.leads).slice(0, 7);
 
-        stats.topEstados = Object.entries(estadosMap)
-            .map(([nome, qtd]) => ({ nome, qtd }))
-            .sort((a, b) => b.qtd - a.qtd)
-            .slice(0, 7);
+        // Processa Estados (>10 leads)
+        stats.stateData = Object.values(stateMap)
+            .filter(s => s.leads > 10)
+            .sort((a, b) => b.leads - a.leads);
 
-        // Processa o Ranking de Idade
-        stats.topIdades = Object.entries(ageBuckets)
-            .map(([range, count]) => ({ range, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 4);
+        // Processa Idades (Remove vazios se quiser, ou mantém todos)
+        stats.ageData = Object.values(ageMap).filter(a => a.leads > 0);
 
         res.json(stats);
 
@@ -713,7 +771,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.33 (Ranking Idade Top 4) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.34 (Cruzamento Completo) Online!'));
 
 const startServer = async () => {
     try {
