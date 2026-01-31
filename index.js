@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.27 - CORREÇÃO DE DADOS E CAMPANHAS)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.28 - PERIODOS AJUSTADOS: 3/7/15/30 DIAS)
 // ============================================================================
 
 const express = require('express');
@@ -78,16 +78,15 @@ const initializeDatabase = async () => {
         `;
         await client.query(createTableQuery);
 
-        // Garante colunas críticas para o Dashboard
+        // Garante colunas críticas
         const colunasExtras = ['adset_name', 'campaign_name', 'dob', 'city', 'estado'];
         for (const col of colunasExtras) {
              const check = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='${col}'`);
              if (check.rows.length === 0) {
                  await client.query(`ALTER TABLE leads ADD COLUMN ${col} TEXT;`);
-                 console.log(`🔧 Coluna '${col}' adicionada.`);
              }
         }
-        console.log('✅ Banco de Dados Pronto e Validado!');
+        console.log('✅ Banco de Dados Pronto!');
     } catch (err) {
         console.error('❌ Erro no Banco:', err.message);
     } finally {
@@ -96,19 +95,17 @@ const initializeDatabase = async () => {
 };
 
 // ============================================================================
-// 2. ROTA DE CAPTURA DO SITE (CORRIGIDA - V8.27)
+// 2. ROTA DE CAPTURA DO SITE (COM DADOS COMPLETOS)
 // ============================================================================
 app.post('/capture-site-data', async (req, res) => {
     const client = await pool.connect();
     try {
         const data = req.body;
         
-        // --- EXTRAÇÃO DE DADOS TÉCNICOS ---
         let ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         if (ip && ip.includes(',')) ip = ip.split(',')[0].trim();
         const userAgent = data.agent || req.headers['user-agent'];
         
-        // --- EXTRAÇÃO DE DADOS PESSOAIS ---
         const email = data.email ? data.email.toLowerCase().trim() : null;
         const phone = data.phone ? data.phone.replace(/\D/g, '') : null;
         let firstName = data.name || '';
@@ -119,12 +116,8 @@ app.post('/capture-site-data', async (req, res) => {
             lastName = parts.slice(1).join(' ');
         }
         
-        // --- EXTRAÇÃO DE DADOS DE CAMPANHA E PERFIL (CORREÇÃO V8.27) ---
-        // O sistema agora aceita múltiplos nomes para garantir que pegue o dado
         const campaign = data.campaign_name || data.utm_campaign || data.campaign || null;
         const adset = data.adset_name || data.utm_content || data.adset || null;
-        
-        // Se o site não enviar DOB/Cidade, fica null (não quebra o sistema)
         const dob = data.dob || data.data_nascimento || null;
         const city = data.city || data.cidade || null;
         const state = data.state || data.estado || data.uf || null;
@@ -134,7 +127,6 @@ app.post('/capture-site-data', async (req, res) => {
         let webLeadId = null;
         let isNewLead = true;
 
-        // TRAVA 1 (24H)
         const checkQuery = `SELECT facebook_lead_id, created_time FROM leads WHERE (email = $1 OR phone = $2) AND created_time > $3 ORDER BY created_time DESC LIMIT 1`;
         const oneDayAgo = Math.floor(Date.now() / 1000) - 86400; 
         const existingLead = await client.query(checkQuery, [email, phone, oneDayAgo]);
@@ -142,15 +134,12 @@ app.post('/capture-site-data', async (req, res) => {
         if (existingLead.rows.length > 0) {
             webLeadId = existingLead.rows[0].facebook_lead_id;
             isNewLead = false;
-            console.log(`⚠️ Lead Existente (Janela 24h). Mantendo ID: ${webLeadId}`);
         } else {
             webLeadId = data.custom_id || `WEB-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            if (isNewLead) console.log(`✨ Novo Lead Criado. ID: ${webLeadId}`);
         }
 
         const createdTime = isNewLead ? Math.floor(Date.now() / 1000) : existingLead.rows[0].created_time;
 
-        // QUERY ATUALIZADA PARA SALVAR TUDO
         const queryText = `
             INSERT INTO leads (
                 facebook_lead_id, created_time, email, phone, first_name, last_name, 
@@ -183,7 +172,7 @@ app.post('/capture-site-data', async (req, res) => {
 });
 
 // ============================================================================
-// 3. ROTA DE WEBHOOK (MANTIDA - É O MOTOR DE ENVIO)
+// 3. ROTA DE WEBHOOK
 // ============================================================================
 app.post('/webhook', async (req, res) => {
     console.log("--- 🔔 Webhook Recebido ---");
@@ -192,10 +181,7 @@ app.post('/webhook', async (req, res) => {
         const crmEventName = leadData.tag ? leadData.tag.name : null;
         const facebookEventName = mapCRMEventToFacebookEvent(crmEventName);
 
-        if (!facebookEventName) {
-            console.log('Ignorado (Tag desconhecida).');
-            return res.status(200).send('Ignorado.');
-        }
+        if (!facebookEventName) return res.status(200).send('Ignorado.');
         if (!leadData.lead) return res.status(400).send('Sem dados.');
         
         const leadEmail = leadData.lead.email ? leadData.lead.email.toLowerCase().trim() : null;
@@ -224,7 +210,6 @@ app.post('/webhook', async (req, res) => {
             
             if (result.rows.length > 0) {
                 dbRow = result.rows[0];
-                console.log(`✅ Lead encontrado (Tentativa ${attempts})`);
                 break; 
             } else {
                 if (attempts < 5) await sleep(3000);
@@ -239,17 +224,13 @@ app.post('/webhook', async (req, res) => {
 
         if (!dbRow) return res.status(200).send('Não encontrado.');
 
-        // TRAVA 2 (Antiguidade)
         const isSiteLead = dbRow.facebook_lead_id && String(dbRow.facebook_lead_id).startsWith('WEB-');
         const now = Math.floor(Date.now() / 1000);
         if (facebookEventName === 'Lead' && isSiteLead && (now - Number(dbRow.created_time)) > 7200) {
-            console.log('🛑 Bloqueado: Lead Antigo.');
             return res.status(200).send('Bloqueado: Lead Antigo.');
         }
 
-        // TRAVA 3 (Estado)
         if (dbRow.last_sent_event === facebookEventName) {
-            console.log('🛑 Duplicado: Já enviado.');
             return res.status(200).send('Duplicado.');
         }
 
@@ -308,7 +289,7 @@ app.get('/baixar-backup', async (req, res) => {
 // 5. ROTA DE IMPORTAÇÃO
 // ============================================================================
 app.get('/importar', (req, res) => {
-     res.send(`<!DOCTYPE html><html><body><h1>Importar Leads (V8.27)</h1><p>Use Postman.</p></body></html>`);
+     res.send(`<!DOCTYPE html><html><body><h1>Importar Leads</h1><p>Use Postman.</p></body></html>`);
 });
 app.post('/import-leads', async (req, res) => {
     const leadsToImport = req.body;
@@ -340,7 +321,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO
+// 6. DASHBOARD ANALÍTICO (V8.28 - PERIODOS AJUSTADOS)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -375,10 +356,11 @@ app.get('/dashboard', (req, res) => {
                 <h1 class="text-3xl font-bold text-white tracking-tight">Monitoramento de Leads SmartCred</h1>
                 <p class="text-slate-400 text-sm mt-1">Análise em tempo real: Site & Formulários Nativos</p>
             </div>
-            <div class="flex gap-2 bg-slate-800 p-1 rounded-lg">
-                <button onclick="carregarDados('hoje')" class="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white shadow-lg" id="btn-hoje">Hoje</button>
-                <button onclick="carregarDados('semana')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300" id="btn-semana">7 Dias</button>
-                <button onclick="carregarDados('quinzena')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300" id="btn-quinzena">15 Dias</button>
+            <div class="flex gap-2 bg-slate-800 p-1 rounded-lg overflow-x-auto">
+                <button onclick="carregarDados('tres_dias')" class="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white shadow-lg whitespace-nowrap" id="btn-tres_dias">3 Dias</button>
+                <button onclick="carregarDados('semana')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-semana">7 Dias</button>
+                <button onclick="carregarDados('quinzena')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-quinzena">15 Dias</button>
+                <button onclick="carregarDados('trinta_dias')" class="px-4 py-2 bg-transparent rounded-lg text-sm hover:bg-slate-700 transition text-slate-300 whitespace-nowrap" id="btn-trinta_dias">30 Dias</button>
             </div>
         </div>
 
@@ -418,7 +400,7 @@ app.get('/dashboard', (req, res) => {
                 </div>
                 <div class="card">
                     <h2 class="text-lg font-semibold text-white">Idade Média</h2>
-                    <p class="text-xs text-slate-400 mb-2">Baseado em formulários com data válida</p>
+                    <p class="text-xs text-slate-400 mb-2">Baseado em dados válidos</p>
                     <div class="flex items-center justify-center py-4">
                         <span class="text-5xl font-bold text-indigo-400" id="kpi-idade">--</span>
                         <span class="text-xl text-slate-500 ml-2">anos</span>
@@ -466,8 +448,9 @@ app.get('/dashboard', (req, res) => {
         let chartDonutObj = null;
 
         async function carregarDados(periodo) {
-            ['hoje', 'semana', 'quinzena'].forEach(p => {
+            ['tres_dias', 'semana', 'quinzena', 'trinta_dias'].forEach(p => {
                 const btn = document.getElementById('btn-' + p);
+                if (!btn) return;
                 if(p === periodo) {
                     btn.classList.remove('bg-transparent', 'text-slate-300');
                     btn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
@@ -529,7 +512,8 @@ app.get('/dashboard', (req, res) => {
             renderTable('table-estados', data.topEstados);
         }
 
-        carregarDados('hoje');
+        // CARREGA 3 DIAS POR PADRÃO
+        carregarDados('tres_dias');
     </script>
 </body>
 </html>
@@ -541,19 +525,21 @@ app.get('/api/kpis', async (req, res) => {
     const client = await pool.connect();
     try {
         const now = new Date();
-        now.setHours(now.getHours() - 3);
+        now.setHours(now.getHours() - 3); // BRT
         
-        let startTimestamp = 0;
-        if (periodo === 'hoje') {
-            now.setHours(0,0,0,0);
-            startTimestamp = Math.floor(now.getTime() / 1000);
-        } else if (periodo === 'semana') {
-            const d = new Date(now); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0);
-            startTimestamp = Math.floor(d.getTime() / 1000);
-        } else if (periodo === 'quinzena') {
-            const d = new Date(now); d.setDate(d.getDate() - 15); d.setHours(0,0,0,0);
-            startTimestamp = Math.floor(d.getTime() / 1000);
-        }
+        // CALCULO DE DATAS DINAMICO
+        let daysToSubtract = 0;
+        if (periodo === 'tres_dias') daysToSubtract = 3;
+        else if (periodo === 'semana') daysToSubtract = 7;
+        else if (periodo === 'quinzena') daysToSubtract = 15;
+        else if (periodo === 'trinta_dias') daysToSubtract = 30;
+        else daysToSubtract = 3; // Fallback
+
+        const startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - daysToSubtract);
+        startDate.setHours(0,0,0,0);
+        
+        const startTimestamp = Math.floor(startDate.getTime() / 1000);
 
         const queryText = `
             SELECT facebook_lead_id, last_sent_event, campaign_name, adset_name, platform, estado, dob 
@@ -630,24 +616,4 @@ app.get('/api/kpis', async (req, res) => {
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Erro ao buscar KPIs' });
-    } finally {
-        client.release();
-    }
-});
-
-// ============================================================================
-// 7. INICIALIZAÇÃO
-// ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.27 (Corrigido) Online!'));
-
-const startServer = async () => {
-    try {
-        await initializeDatabase();
-        app.listen(port, () => console.log(`🚀 Servidor na porta ${port}`));
-    } catch (error) {
-        console.error("❌ Falha:", error);
-    }
-};
-
-startServer();
+        res.status(500).json({
