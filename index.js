@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.23 - COM DASHBOARD VISUAL)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.24 - DASHBOARD PROTEGIDO)
 // ============================================================================
 
 const express = require('express');
@@ -527,11 +527,27 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 5.1 ROTA: DASHBOARD VISUAL (NOVO)
+// 6. DASHBOARD PROTEGIDO & API (NOVO)
 // ============================================================================
 
-// A. Rota que serve o HTML do Dashboard
+// A. Rota que serve o HTML do Dashboard (COM SENHA)
 app.get('/dashboard', (req, res) => {
+    
+    // --- 🔒 CONFIGURAÇÃO DE SEGURANÇA ---
+    const SENHA_MESTRA = 'smart2026'; 
+    // ------------------------------------
+
+    const senhaDigitada = req.query.senha;
+
+    if (senhaDigitada !== SENHA_MESTRA) {
+        return res.status(403).send(`
+            <div style="font-family: sans-serif; text-align: center; margin-top: 100px; color: #1e293b;">
+                <h1>🔒 Acesso Negado</h1>
+                <p>Você não tem permissão para visualizar este painel.</p>
+            </div>
+        `);
+    }
+
     res.send(`
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -596,7 +612,6 @@ app.get('/dashboard', (req, res) => {
         let chartDonutObj = null;
 
         async function carregarDados(periodo) {
-            // Atualiza botões
             document.querySelectorAll('button').forEach(b => b.classList.replace('bg-blue-600', 'bg-slate-700'));
             document.getElementById('btn-' + periodo).classList.replace('bg-slate-700', 'bg-blue-600');
 
@@ -604,7 +619,6 @@ app.get('/dashboard', (req, res) => {
                 const res = await fetch('/api/kpis?periodo=' + periodo);
                 const data = await res.json();
 
-                // Atualiza KPIs
                 document.getElementById('kpi-total').innerText = data.total;
                 document.getElementById('kpi-atendeu').innerText = data.atendeu;
                 document.getElementById('kpi-oportunidade').innerText = data.oportunidade;
@@ -615,7 +629,6 @@ app.get('/dashboard', (req, res) => {
         }
 
         function renderCharts(data) {
-            // Prepara dados
             const categories = ['Novos', 'Atendeu', 'Oportunidade', 'Vencemos', 'Desqualificado'];
             const values = [
                 data.novos || 0,
@@ -625,7 +638,6 @@ app.get('/dashboard', (req, res) => {
                 data.desqualificado || 0
             ];
 
-            // 1. Gráfico Funil (Barras)
             const optionsFunnel = {
                 series: [{ name: 'Leads', data: values }],
                 chart: { type: 'bar', height: 350, toolbar: { show: false }, background: 'transparent' },
@@ -638,7 +650,6 @@ app.get('/dashboard', (req, res) => {
                 theme: { mode: 'dark' }
             };
 
-            // 2. Gráfico Donut
             const optionsDonut = {
                 series: values.filter(v => v > 0),
                 labels: categories.filter((_, i) => values[i] > 0),
@@ -658,7 +669,6 @@ app.get('/dashboard', (req, res) => {
             chartDonutObj.render();
         }
 
-        // Carregar inicial
         carregarDados('hoje');
     </script>
 </body>
@@ -666,15 +676,14 @@ app.get('/dashboard', (req, res) => {
     `);
 });
 
-// B. API que fornece os dados para o Dashboard
+// B. API interna para alimentar os gráficos
 app.get('/api/kpis', async (req, res) => {
-    const { periodo } = req.query; // 'hoje', 'semana', 'quinzena'
+    const { periodo } = req.query; 
     const client = await pool.connect();
 
     try {
-        // Calcular Timestamp de Corte (Considerando Fuso -3h BRT)
         const now = new Date();
-        now.setHours(now.getHours() - 3); // Ajuste manual para garantir BRT
+        now.setHours(now.getHours() - 3); // Fuso Brasil
         
         let startTimestamp = 0;
         
@@ -693,7 +702,6 @@ app.get('/api/kpis', async (req, res) => {
             startTimestamp = Math.floor(fifteenDaysAgo.getTime() / 1000);
         }
 
-        // Busca agregada por status
         const queryText = `
             SELECT last_sent_event, COUNT(*) as qtd 
             FROM leads 
@@ -703,7 +711,6 @@ app.get('/api/kpis', async (req, res) => {
         
         const result = await client.query(queryText, [startTimestamp]);
         
-        // Formata para o JSON de resposta
         const stats = {
             total: 0,
             novos: 0,
@@ -736,11 +743,10 @@ app.get('/api/kpis', async (req, res) => {
     }
 });
 
-
 // ============================================================================
-// 6. INICIALIZAÇÃO
+// 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.23 (Blindagem Tripla) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.24 (Blindagem Tripla) Online!'));
 
 const startServer = async () => {
     try {
