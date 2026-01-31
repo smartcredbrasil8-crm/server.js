@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.26 - BASE V8.22 + DASHBOARD ADSETS)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.27 - CORREÇÃO DE DADOS E CAMPANHAS)
 // ============================================================================
 
 const express = require('express');
@@ -17,7 +17,7 @@ app.use(express.json({ limit: '50mb' }));
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================================================
-// 1. CONFIGURAÇÕES E MAPA DE EVENTOS (AJUSTADO PARA O FUNIL SMARTCRED)
+// 1. CONFIGURAÇÕES E MAPA DE EVENTOS
 // ============================================================================
 
 const mapCRMEventToFacebookEvent = (crmEvent) => {
@@ -25,14 +25,12 @@ const mapCRMEventToFacebookEvent = (crmEvent) => {
     
     switch (crmEvent.toUpperCase()) {
         case 'NOVOS': return 'Lead'; 
-        // Ordem exata solicitada para o Dashboard:
-        case 'ATENDEU': return 'Atendeu';       // 1
-        case 'OPORTUNIDADE': return 'Oportunidade'; // 2
-        case 'AVANÇADO': return 'Avançado';     // 3
-        case 'VÍDEO': return 'Vídeo';           // 4
-        case 'VENCEMOS': return 'Vencemos';     // 5 (Venda)
+        case 'ATENDEU': return 'Atendeu';       
+        case 'OPORTUNIDADE': return 'Oportunidade'; 
+        case 'AVANÇADO': return 'Avançado';     
+        case 'VÍDEO': return 'Vídeo';           
+        case 'VENCEMOS': return 'Vencemos';     
         
-        // Outros
         case 'QUER EMPREGO': return 'Desqualificado';
         case 'QUER EMPRESTIMO': return 'Não Qualificado';
         default: return crmEvent;
@@ -80,14 +78,16 @@ const initializeDatabase = async () => {
         `;
         await client.query(createTableQuery);
 
-        // Garante que a coluna adset_name exista (para códigos antigos)
-        const check = await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='adset_name'");
-        if (check.rows.length === 0) {
-            await client.query("ALTER TABLE leads ADD COLUMN adset_name TEXT;");
-            console.log("🔧 Coluna 'adset_name' adicionada.");
+        // Garante colunas críticas para o Dashboard
+        const colunasExtras = ['adset_name', 'campaign_name', 'dob', 'city', 'estado'];
+        for (const col of colunasExtras) {
+             const check = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_name='leads' AND column_name='${col}'`);
+             if (check.rows.length === 0) {
+                 await client.query(`ALTER TABLE leads ADD COLUMN ${col} TEXT;`);
+                 console.log(`🔧 Coluna '${col}' adicionada.`);
+             }
         }
-
-        console.log('✅ Banco de Dados Pronto!');
+        console.log('✅ Banco de Dados Pronto e Validado!');
     } catch (err) {
         console.error('❌ Erro no Banco:', err.message);
     } finally {
@@ -96,18 +96,21 @@ const initializeDatabase = async () => {
 };
 
 // ============================================================================
-// 2. ROTAS DE CAPTURA E WEBHOOK (MANTIDO IDÊNTICO AO V8.22)
+// 2. ROTA DE CAPTURA DO SITE (CORRIGIDA - V8.27)
 // ============================================================================
 app.post('/capture-site-data', async (req, res) => {
     const client = await pool.connect();
     try {
         const data = req.body;
+        
+        // --- EXTRAÇÃO DE DADOS TÉCNICOS ---
         let ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         if (ip && ip.includes(',')) ip = ip.split(',')[0].trim();
         const userAgent = data.agent || req.headers['user-agent'];
+        
+        // --- EXTRAÇÃO DE DADOS PESSOAIS ---
         const email = data.email ? data.email.toLowerCase().trim() : null;
         const phone = data.phone ? data.phone.replace(/\D/g, '') : null;
-        
         let firstName = data.name || '';
         let lastName = '';
         if (firstName.includes(' ')) {
@@ -115,8 +118,19 @@ app.post('/capture-site-data', async (req, res) => {
             firstName = parts[0];
             lastName = parts.slice(1).join(' ');
         }
+        
+        // --- EXTRAÇÃO DE DADOS DE CAMPANHA E PERFIL (CORREÇÃO V8.27) ---
+        // O sistema agora aceita múltiplos nomes para garantir que pegue o dado
+        const campaign = data.campaign_name || data.utm_campaign || data.campaign || null;
+        const adset = data.adset_name || data.utm_content || data.adset || null;
+        
+        // Se o site não enviar DOB/Cidade, fica null (não quebra o sistema)
+        const dob = data.dob || data.data_nascimento || null;
+        const city = data.city || data.cidade || null;
+        const state = data.state || data.estado || data.uf || null;
 
-        console.log(`🚀 [SITE] RECEBIDO: ${firstName}`);
+        console.log(`🚀 [SITE] RECEBIDO: ${firstName} | Campanha: ${campaign || 'N/A'}`);
+
         let webLeadId = null;
         let isNewLead = true;
 
@@ -131,25 +145,35 @@ app.post('/capture-site-data', async (req, res) => {
             console.log(`⚠️ Lead Existente (Janela 24h). Mantendo ID: ${webLeadId}`);
         } else {
             webLeadId = data.custom_id || `WEB-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            console.log(`✨ Novo Lead Criado. ID: ${webLeadId}`);
+            if (isNewLead) console.log(`✨ Novo Lead Criado. ID: ${webLeadId}`);
         }
 
         const createdTime = isNewLead ? Math.floor(Date.now() / 1000) : existingLead.rows[0].created_time;
 
+        // QUERY ATUALIZADA PARA SALVAR TUDO
         const queryText = `
-            INSERT INTO leads (facebook_lead_id, created_time, email, phone, first_name, last_name, fbc, fbp, client_ip_address, client_user_agent, platform, is_organic, form_name)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'site_smartcred', false, 'Formulario Site')
+            INSERT INTO leads (
+                facebook_lead_id, created_time, email, phone, first_name, last_name, 
+                fbc, fbp, client_ip_address, client_user_agent, platform, is_organic, form_name,
+                dob, city, estado, campaign_name, adset_name
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'site_smartcred', false, 'Formulario Site', $11, $12, $13, $14, $15)
             ON CONFLICT (facebook_lead_id) DO UPDATE SET
                 email = COALESCE(EXCLUDED.email, leads.email),
                 phone = COALESCE(EXCLUDED.phone, leads.phone),
                 first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
-                last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
-                fbc = COALESCE(EXCLUDED.fbc, leads.fbc),
-                fbp = COALESCE(EXCLUDED.fbp, leads.fbp);
+                campaign_name = COALESCE(EXCLUDED.campaign_name, leads.campaign_name),
+                adset_name = COALESCE(EXCLUDED.adset_name, leads.adset_name);
         `;
 
-        await client.query(queryText, [webLeadId, createdTime, email, phone, firstName, lastName, data.fbc, data.fbp, ip, userAgent]);
+        await client.query(queryText, [
+            webLeadId, createdTime, email, phone, firstName, lastName, 
+            data.fbc, data.fbp, ip, userAgent,
+            dob, city, state, campaign, adset
+        ]);
+
         res.status(200).json({ success: true, id: webLeadId });
+
     } catch (error) {
         console.error('❌ [ERRO] Falha ao salvar:', error);
         res.status(500).json({ success: false });
@@ -158,6 +182,9 @@ app.post('/capture-site-data', async (req, res) => {
     }
 });
 
+// ============================================================================
+// 3. ROTA DE WEBHOOK (MANTIDA - É O MOTOR DE ENVIO)
+// ============================================================================
 app.post('/webhook', async (req, res) => {
     console.log("--- 🔔 Webhook Recebido ---");
     try {
@@ -189,7 +216,6 @@ app.post('/webhook', async (req, res) => {
         let dbRow;
         let attempts = 0;
         
-        // Loop de Paciência (Igual V8.22)
         while (attempts < 5) {
             attempts++;
             const result = await pool.query(`
@@ -257,7 +283,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ============================================================================
-// 3. ROTA DE BACKUP (ATUALIZADA PARA INCLUIR ADSET)
+// 4. ROTA DE BACKUP
 // ============================================================================
 app.get('/baixar-backup', async (req, res) => {
     const client = await pool.connect();
@@ -266,7 +292,6 @@ app.get('/baixar-backup', async (req, res) => {
         const result = await client.query(queryText);
         if (result.rows.length === 0) return res.send('Banco vazio.');
         
-        // Incluindo ADSET na exportação
         let csv = 'id;created_time;name;email;phone;campaign;adset;status\n';
         result.rows.forEach(row => {
             let date = new Date(Number(row.created_time) * 1000).toISOString();
@@ -280,10 +305,10 @@ app.get('/baixar-backup', async (req, res) => {
 });
 
 // ============================================================================
-// 4. ROTA DE IMPORTAÇÃO (ATUALIZADA PARA INCLUIR ADSET)
+// 5. ROTA DE IMPORTAÇÃO
 // ============================================================================
 app.get('/importar', (req, res) => {
-     res.send(`<!DOCTYPE html><html><body><h1>Importar Leads (V8.26)</h1><p>Use Postman.</p></body></html>`);
+     res.send(`<!DOCTYPE html><html><body><h1>Importar Leads (V8.27)</h1><p>Use Postman.</p></body></html>`);
 });
 app.post('/import-leads', async (req, res) => {
     const leadsToImport = req.body;
@@ -302,7 +327,6 @@ app.post('/import-leads', async (req, res) => {
              let time = l.created_time;
              if(String(time).includes('-')) time = Math.floor(new Date(time).getTime()/1000);
              
-             // Incluindo adset_name na importação
              await client.query(queryText, [
                  id, time, l.email, l.phone, l.first_name, l.last_name, l.dob, l.city, l.state, l.zip_code, l.campaign_name, l.adset_name, l.platform, l.form_name, false
              ]);
@@ -316,7 +340,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 5. DASHBOARD ANALÍTICO (NOVO MÓDULO VISUAL)
+// 6. DASHBOARD ANALÍTICO
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -394,7 +418,7 @@ app.get('/dashboard', (req, res) => {
                 </div>
                 <div class="card">
                     <h2 class="text-lg font-semibold text-white">Idade Média</h2>
-                    <p class="text-xs text-slate-400 mb-2">Baseado em dados válidos</p>
+                    <p class="text-xs text-slate-400 mb-2">Baseado em formulários com data válida</p>
                     <div class="flex items-center justify-center py-4">
                         <span class="text-5xl font-bold text-indigo-400" id="kpi-idade">--</span>
                         <span class="text-xl text-slate-500 ml-2">anos</span>
@@ -613,9 +637,9 @@ app.get('/api/kpis', async (req, res) => {
 });
 
 // ============================================================================
-// 6. INICIALIZAÇÃO
+// 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.26 (Com Adsets) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.27 (Corrigido) Online!'));
 
 const startServer = async () => {
     try {
