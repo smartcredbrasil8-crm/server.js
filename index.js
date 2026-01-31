@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.36 - CORREÇÃO CRÍTICA DE FUNIL E TABELAS)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.37 - TOP 15 ESTADOS NO GRÁFICO)
 // ============================================================================
 
 const express = require('express');
@@ -325,7 +325,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO (V8.36 - LÓGICA CUMULATIVA CORRIGIDA)
+// 6. DASHBOARD ANALÍTICO (V8.37 - TOP 15 ESTADOS + CORREÇÕES)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -402,7 +402,7 @@ app.get('/dashboard', (req, res) => {
         
         <div class="grid grid-cols-1 gap-6 mb-8">
              <div class="card">
-                <h2 class="text-lg font-semibold mb-2 text-white">Top 7 Estados (UF)</h2>
+                <h2 class="text-lg font-semibold mb-2 text-white">Top 15 Estados (UF)</h2>
                 <div id="chart-states"></div>
             </div>
         </div>
@@ -575,7 +575,7 @@ app.get('/dashboard', (req, res) => {
             });
             chartCompareObj.render();
 
-            // 3. Gráfico Estados
+            // 3. Gráfico Estados (TOP 15)
             const stateNames = data.topEstados.map(e => e.nome);
             const stateVals = data.topEstados.map(e => e.qtd);
 
@@ -799,7 +799,7 @@ app.get('/api/kpis', async (req, res) => {
         stats.topEstados = Object.entries(stateMap)
             .map(([nome, obj]) => ({ nome, qtd: obj.leads }))
             .sort((a, b) => b.qtd - a.qtd)
-            .slice(0, 7); // Gráfico mantém top 7 para não poluir
+            .slice(0, 15); // AQUI: Alterado para TOP 15
 
         // Tabela Estados (TODOS)
         stats.stateData = Object.values(stateMap)
@@ -821,7 +821,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.36 (Correção Final) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.37 (Top 15 Estados) Online!'));
 
 const startServer = async () => {
     try {
