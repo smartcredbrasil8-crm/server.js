@@ -1,5 +1,5 @@
 // ============================================================================
-// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.28 - VERSÃO FINAL CORRIGIDA)
+// SERVIDOR DE INTELIGÊNCIA DE LEADS (V8.31 - IDADE 20-65 & CORREÇÃO YYYYMMDD)
 // ============================================================================
 
 const express = require('express');
@@ -30,7 +30,6 @@ const mapCRMEventToFacebookEvent = (crmEvent) => {
         case 'AVANÇADO': return 'Avançado';     
         case 'VÍDEO': return 'Vídeo';           
         case 'VENCEMOS': return 'Vencemos';     
-        
         case 'QUER EMPREGO': return 'Desqualificado';
         case 'QUER EMPRESTIMO': return 'Não Qualificado';
         default: return crmEvent;
@@ -151,7 +150,8 @@ app.post('/capture-site-data', async (req, res) => {
                 phone = COALESCE(EXCLUDED.phone, leads.phone),
                 first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
                 campaign_name = COALESCE(EXCLUDED.campaign_name, leads.campaign_name),
-                adset_name = COALESCE(EXCLUDED.adset_name, leads.adset_name);
+                adset_name = COALESCE(EXCLUDED.adset_name, leads.adset_name),
+                dob = COALESCE(EXCLUDED.dob, leads.dob);
         `;
 
         await client.query(queryText, [
@@ -239,6 +239,12 @@ app.post('/webhook', async (req, res) => {
             em: dbRow.email ? [crypto.createHash('sha256').update(dbRow.email).digest('hex')] : [],
             ph: dbRow.phone ? [crypto.createHash('sha256').update(dbRow.phone).digest('hex')] : []
         };
+        // Formata DOB para API Facebook (Hash YYYYMMDD)
+        if (dbRow.dob) {
+            const cleanDob = String(dbRow.dob).replace(/\D/g, '');
+            userData.db = [crypto.createHash('sha256').update(cleanDob).digest('hex')];
+        }
+
         if (dbRow.fbc) userData.fbc = dbRow.fbc;
         if (dbRow.fbp) userData.fbp = dbRow.fbp;
 
@@ -320,7 +326,7 @@ app.post('/import-leads', async (req, res) => {
 });
 
 // ============================================================================
-// 6. DASHBOARD ANALÍTICO
+// 6. DASHBOARD ANALÍTICO (V8.31)
 // ============================================================================
 
 app.get('/dashboard', (req, res) => {
@@ -337,7 +343,7 @@ app.get('/dashboard', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitoramento Leads SmartCred</title>
+    <title>BI SmartCred</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
@@ -352,8 +358,8 @@ app.get('/dashboard', (req, res) => {
         
         <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
             <div>
-                <h1 class="text-3xl font-bold text-white tracking-tight">Monitoramento de Leads SmartCred</h1>
-                <p class="text-slate-400 text-sm mt-1">Análise em tempo real: Site & Formulários Nativos</p>
+                <h1 class="text-3xl font-bold text-white tracking-tight">Monitoramento SmartCred</h1>
+                <p class="text-slate-400 text-sm mt-1">Inteligência de Tráfego e Vendas</p>
             </div>
             <div class="flex gap-2 bg-slate-800 p-1 rounded-lg overflow-x-auto">
                 <button onclick="carregarDados('tres_dias')" class="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500 transition font-bold text-white shadow-lg whitespace-nowrap" id="btn-tres_dias">3 Dias</button>
@@ -365,77 +371,78 @@ app.get('/dashboard', (req, res) => {
 
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div class="card border-t-4 border-blue-500">
-                <h3 class="text-slate-400 text-xs uppercase font-bold">Total Leads (Entrada)</h3>
-                <div class="flex items-baseline mt-2">
-                    <p class="text-4xl font-bold text-white" id="kpi-total">0</p>
-                </div>
+                <h3 class="text-slate-400 text-xs uppercase font-bold">Total Leads</h3>
+                <p class="text-4xl font-bold text-white mt-2" id="kpi-total">0</p>
             </div>
             <div class="card border-t-4 border-indigo-500">
-                <h3 class="text-slate-400 text-xs uppercase font-bold">Origem Site (WEB)</h3>
-                <p class="text-4xl font-bold text-white mt-2" id="kpi-site">0</p>
+                <h3 class="text-slate-400 text-xs uppercase font-bold">Atendeu</h3>
+                <p class="text-4xl font-bold text-white mt-2" id="kpi-atendeu">0</p>
             </div>
-            <div class="card border-t-4 border-cyan-500">
-                <h3 class="text-slate-400 text-xs uppercase font-bold">Origem Facebook (Form)</h3>
-                <p class="text-4xl font-bold text-white mt-2" id="kpi-fb">0</p>
+            <div class="card border-t-4 border-yellow-500">
+                <h3 class="text-slate-400 text-xs uppercase font-bold">Oportunidade</h3>
+                <p class="text-4xl font-bold text-white mt-2" id="kpi-oportunidade">0</p>
             </div>
             <div class="card border-t-4 border-green-500 bg-slate-800">
-                <h3 class="text-slate-400 text-xs uppercase font-bold">Vendas (Vencemos)</h3>
+                <h3 class="text-slate-400 text-xs uppercase font-bold">Vendas</h3>
                 <p class="text-4xl font-bold text-green-400 mt-2" id="kpi-vendas">0</p>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-            <div class="card lg:col-span-2">
-                <h2 class="text-lg font-semibold mb-1 text-white flex items-center gap-2">
-                    <span class="w-2 h-6 bg-blue-500 rounded-full"></span> Funil de Vendas (Etapas)
-                </h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="card">
+                <h2 class="text-lg font-semibold mb-2 text-white">Funil Geral</h2>
                 <div id="chart-funnel"></div>
             </div>
-
-            <div class="flex flex-col gap-6">
-                <div class="card flex-1">
-                    <h2 class="text-lg font-semibold mb-4 text-white">Share de Origem</h2>
-                    <div id="chart-donut"></div>
-                </div>
-                <div class="card">
-                    <h2 class="text-lg font-semibold text-white">Idade Média</h2>
-                    <p class="text-xs text-slate-400 mb-2">Baseado em dados válidos</p>
-                    <div class="flex items-center justify-center py-4">
-                        <span class="text-5xl font-bold text-indigo-400" id="kpi-idade">--</span>
-                        <span class="text-xl text-slate-500 ml-2">anos</span>
-                    </div>
-                </div>
+            <div class="card">
+                <h2 class="text-lg font-semibold mb-2 text-white">Top 5 Campanhas</h2>
+                <div id="chart-compare"></div>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="card">
-                <h2 class="text-lg font-semibold mb-4 text-white border-b border-slate-700 pb-2">Top Campanhas</h2>
-                <div class="overflow-x-auto max-h-64 scroll-custom">
-                    <table class="w-full text-sm text-left text-slate-300">
-                        <tbody id="table-campanhas"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2 class="text-lg font-semibold mb-4 text-white border-b border-slate-700 pb-2">Top Conjuntos (Adset)</h2>
-                <div class="overflow-x-auto max-h-64 scroll-custom">
-                    <table class="w-full text-sm text-left text-slate-300">
-                        <tbody id="table-adsets"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2 class="text-lg font-semibold mb-4 text-white border-b border-slate-700 pb-2">Top Estados (UF)</h2>
-                <div class="overflow-x-auto max-h-64 scroll-custom">
-                    <table class="w-full text-sm text-left text-slate-300">
-                        <tbody id="table-estados"></tbody>
-                    </table>
-                </div>
+        <div class="card mb-8">
+            <h2 class="text-xl font-bold text-white mb-4 border-b border-slate-700 pb-3">🚀 Matriz de Performance (Funil por Conjunto)</h2>
+            <div class="overflow-x-auto scroll-custom max-h-96">
+                <table class="w-full text-sm text-left text-slate-300">
+                    <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-3">Campanha</th>
+                            <th class="px-4 py-3">Conjunto (Adset)</th>
+                            <th class="px-4 py-3 text-center">Leads</th>
+                            <th class="px-4 py-3 text-center">Atendeu</th>
+                            <th class="px-4 py-3 text-center">Vendas</th>
+                            <th class="px-4 py-3 text-center">Conv. %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-matrix"></tbody>
+                </table>
             </div>
         </div>
+
+        <div class="card">
+            <h2 class="text-lg font-semibold mb-4 text-white flex justify-between items-center">
+                <span>📋 Últimos 50 Leads</span>
+                <div class="flex items-center text-sm font-normal bg-slate-800 px-3 py-1 rounded">
+                    <span class="text-slate-400 mr-2">Idade Média (20-65 anos):</span>
+                    <span class="text-indigo-400 font-bold text-xl" id="kpi-idade">--</span>
+                    <span class="text-slate-500 ml-1">anos</span>
+                </div>
+            </h2>
+            <div class="overflow-x-auto scroll-custom max-h-80">
+                <table class="w-full text-sm text-left text-slate-300">
+                    <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-3">Data Ent.</th>
+                            <th class="px-4 py-3">Nome</th>
+                            <th class="px-4 py-3">Nascimento</th>
+                            <th class="px-4 py-3">Campanha</th>
+                            <th class="px-4 py-3">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-leads"></tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -444,18 +451,31 @@ app.get('/dashboard', (req, res) => {
         Apex.tooltip = { theme: 'dark' };
 
         let chartFunnelObj = null;
-        let chartDonutObj = null;
+        let chartCompareObj = null;
+
+        function formatarDataNasc(raw) {
+            if (!raw) return '--';
+            const s = String(raw).replace(/\D/g, ''); 
+            if (s.length === 8) {
+                const y = s.substring(0, 4);
+                const m = s.substring(4, 6);
+                const d = s.substring(6, 8);
+                return \`\${d}/\${m}/\${y}\`;
+            }
+            return raw; 
+        }
 
         async function carregarDados(periodo) {
             ['tres_dias', 'semana', 'quinzena', 'trinta_dias'].forEach(p => {
                 const btn = document.getElementById('btn-' + p);
-                if (!btn) return;
-                if(p === periodo) {
-                    btn.classList.remove('bg-transparent', 'text-slate-300');
-                    btn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
-                } else {
-                    btn.classList.add('bg-transparent', 'text-slate-300');
-                    btn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+                if (btn) {
+                    if(p === periodo) {
+                        btn.classList.remove('bg-transparent', 'text-slate-300');
+                        btn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
+                    } else {
+                        btn.classList.add('bg-transparent', 'text-slate-300');
+                        btn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+                    }
                 }
             });
 
@@ -468,47 +488,71 @@ app.get('/dashboard', (req, res) => {
 
         function atualizarInterface(data) {
             document.getElementById('kpi-total').innerText = data.total;
-            document.getElementById('kpi-site').innerText = data.totalSite;
-            document.getElementById('kpi-fb').innerText = data.totalFb;
+            document.getElementById('kpi-atendeu').innerText = data.funil.atendeu;
+            document.getElementById('kpi-oportunidade').innerText = data.funil.oportunidade;
             document.getElementById('kpi-vendas').innerText = data.funil.vencemos;
-            document.getElementById('kpi-idade').innerText = data.idadeMedia > 0 ? data.idadeMedia : '--';
+            
+            // Atualiza Idade Média no Header da Tabela
+            const idadeEl = document.getElementById('kpi-idade');
+            if(data.idadeMedia > 0) idadeEl.innerText = data.idadeMedia;
+            else idadeEl.innerText = '--';
 
-            const categories = ['Novos', '1. Atendeu', '2. Oportunidade', '3. Avançado', '4. Vídeo', '5. Vencemos'];
-            const seriesData = [data.total, data.funil.atendeu, data.funil.oportunidade, data.funil.avancado, data.funil.video, data.funil.vencemos];
+            const categoriesFunnel = ['Novos', 'Atendeu', 'Oportunidade', 'Avançado', 'Vídeo', 'Vencemos'];
+            const seriesFunnel = [data.total, data.funil.atendeu, data.funil.oportunidade, data.funil.avancado, data.funil.video, data.funil.vencemos];
 
             if (chartFunnelObj) chartFunnelObj.destroy();
             chartFunnelObj = new ApexCharts(document.querySelector("#chart-funnel"), {
-                series: [{ name: 'Leads', data: seriesData }],
-                chart: { type: 'bar', height: 350 },
-                plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%', distributed: true } },
+                series: [{ name: 'Leads', data: seriesFunnel }],
+                chart: { type: 'bar', height: 300 },
+                plotOptions: { bar: { borderRadius: 4, horizontal: true, distributed: true } },
                 colors: ['#64748b', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#10b981'],
-                dataLabels: { enabled: true },
-                xaxis: { categories: categories, labels: { style: { colors: '#cbd5e1' } } },
+                xaxis: { categories: categoriesFunnel, labels: { style: { colors: '#cbd5e1' } } },
                 yaxis: { labels: { style: { colors: '#cbd5e1' } } },
                 legend: { show: false }
             });
             chartFunnelObj.render();
 
-            if (chartDonutObj) chartDonutObj.destroy();
-            chartDonutObj = new ApexCharts(document.querySelector("#chart-donut"), {
-                series: [data.totalSite, data.totalFb],
-                labels: ['Site (Web)', 'Facebook (Nativo)'],
-                chart: { type: 'donut', height: 250 },
-                colors: ['#3b82f6', '#06b6d4'],
-                legend: { position: 'bottom', labels: { colors: '#cbd5e1' } },
-                stroke: { show: false }
+            const campNames = data.topCampanhas.map(c => c.nome.substring(0, 15));
+            const campLeads = data.topCampanhas.map(c => c.leads);
+            const campVendas = data.topCampanhas.map(c => c.vendas);
+
+            if (chartCompareObj) chartCompareObj.destroy();
+            chartCompareObj = new ApexCharts(document.querySelector("#chart-compare"), {
+                series: [{ name: 'Leads', data: campLeads }, { name: 'Vendas', data: campVendas }],
+                chart: { type: 'bar', height: 300 },
+                colors: ['#3b82f6', '#10b981'],
+                xaxis: { categories: campNames, labels: { style: { colors: '#cbd5e1' } } },
+                yaxis: { labels: { style: { colors: '#cbd5e1' } } },
+                legend: { labels: { colors: '#cbd5e1' } },
+                plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } }
             });
-            chartDonutObj.render();
+            chartCompareObj.render();
 
-            const renderTable = (id, list) => {
-                document.getElementById(id).innerHTML = list.map(c => 
-                    \`<tr class="border-b border-slate-700 hover:bg-slate-700/50"><td class="px-4 py-3 font-medium text-white truncate max-w-xs" title="\${c.nome}">\${c.nome}</td><td class="px-4 py-3 text-right font-bold text-blue-400">\${c.qtd}</td></tr>\`
-                ).join('');
-            };
+            const tbodyMatrix = document.getElementById('table-matrix');
+            tbodyMatrix.innerHTML = data.matrix.map(row => {
+                const conv = row.leads > 0 ? ((row.vendas / row.leads) * 100).toFixed(1) + '%' : '0%';
+                return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
+                    <td class="px-4 py-3 font-medium text-white">\${row.campaign || 'N/A'}</td>
+                    <td class="px-4 py-3 text-slate-400">\${row.adset || 'N/A'}</td>
+                    <td class="px-4 py-3 text-center text-blue-400 font-bold">\${row.leads}</td>
+                    <td class="px-4 py-3 text-center">\${row.atendeu}</td>
+                    <td class="px-4 py-3 text-center text-green-400 font-bold">\${row.vendas}</td>
+                    <td class="px-4 py-3 text-center text-xs">\${conv}</td>
+                </tr>\`;
+            }).join('');
 
-            renderTable('table-campanhas', data.topCampanhas);
-            renderTable('table-adsets', data.topAdsets);
-            renderTable('table-estados', data.topEstados);
+            const tbodyLeads = document.getElementById('table-leads');
+            tbodyLeads.innerHTML = data.recentLeads.map(l => {
+                const date = new Date(Number(l.created_time) * 1000).toLocaleDateString('pt-BR');
+                const dobFormatado = formatarDataNasc(l.dob);
+                return \`<tr class="border-b border-slate-700 hover:bg-slate-700/50">
+                    <td class="px-4 py-3 text-slate-400 text-xs">\${date}</td>
+                    <td class="px-4 py-3 text-white">\${l.first_name}</td>
+                    <td class="px-4 py-3 text-yellow-400">\${dobFormatado}</td>
+                    <td class="px-4 py-3 text-xs text-slate-400">\${l.campaign_name || '-'}</td>
+                    <td class="px-4 py-3 text-xs">\${l.last_sent_event || 'Novo'}</td>
+                </tr>\`;
+            }).join('');
         }
 
         carregarDados('tres_dias');
@@ -525,48 +569,40 @@ app.get('/api/kpis', async (req, res) => {
         const now = new Date();
         now.setHours(now.getHours() - 3);
         
-        let daysToSubtract = 0;
-        if (periodo === 'tres_dias') daysToSubtract = 3;
-        else if (periodo === 'semana') daysToSubtract = 7;
+        let daysToSubtract = 3;
+        if (periodo === 'semana') daysToSubtract = 7;
         else if (periodo === 'quinzena') daysToSubtract = 15;
         else if (periodo === 'trinta_dias') daysToSubtract = 30;
-        else daysToSubtract = 3; 
 
         const startDate = new Date(now);
         startDate.setDate(startDate.getDate() - daysToSubtract);
         startDate.setHours(0,0,0,0);
-        
         const startTimestamp = Math.floor(startDate.getTime() / 1000);
 
         const queryText = `
-            SELECT facebook_lead_id, last_sent_event, campaign_name, adset_name, platform, estado, dob 
+            SELECT facebook_lead_id, last_sent_event, campaign_name, adset_name, dob, first_name, created_time
             FROM leads 
             WHERE created_time >= $1
+            ORDER BY created_time DESC
         `;
         const result = await client.query(queryText, [startTimestamp]);
         
         const stats = {
             total: 0,
-            totalSite: 0,
-            totalFb: 0,
             funil: { atendeu: 0, oportunidade: 0, avancado: 0, video: 0, vencemos: 0 },
-            topCampanhas: [],
-            topAdsets: [],
-            topEstados: [],
-            idadeMedia: 0
+            matrix: [], 
+            topCampanhas: [], 
+            recentLeads: result.rows.slice(0, 50),
+            idadeMedia: 0 
         };
 
-        const campanhasMap = {};
-        const adsetsMap = {};
-        const estadosMap = {};
+        const matrixMap = {}; 
         let somaIdade = 0;
         let qtdIdadeValida = 0;
 
         result.rows.forEach(row => {
             stats.total++;
-            const isWeb = row.facebook_lead_id && String(row.facebook_lead_id).startsWith('WEB-');
-            if (isWeb) stats.totalSite++; else stats.totalFb++;
-
+            
             const st = row.last_sent_event ? row.last_sent_event.toUpperCase() : '';
             if (st === 'ATENDEU') stats.funil.atendeu++;
             else if (st === 'OPORTUNIDADE') stats.funil.oportunidade++;
@@ -574,27 +610,38 @@ app.get('/api/kpis', async (req, res) => {
             else if (st === 'VÍDEO' || st === 'VIDEO') stats.funil.video++;
             else if (st === 'VENCEMOS' || st === 'VENDA') stats.funil.vencemos++;
 
-            const campName = row.campaign_name || 'Sem Campanha';
-            campanhasMap[campName] = (campanhasMap[campName] || 0) + 1;
+            const camp = row.campaign_name || 'Sem Campanha';
+            const adset = row.adset_name || 'Geral';
+            const key = `${camp}|${adset}`;
 
-            const adsetName = row.adset_name || 'Sem Conjunto';
-            adsetsMap[adsetName] = (adsetsMap[adsetName] || 0) + 1;
+            if (!matrixMap[key]) {
+                matrixMap[key] = { campaign: camp, adset: adset, leads: 0, atendeu: 0, vendas: 0 };
+            }
+            matrixMap[key].leads++;
+            if (st === 'ATENDEU') matrixMap[key].atendeu++;
+            if (st === 'VENCEMOS' || st === 'VENDA') matrixMap[key].vendas++;
 
-            const estName = row.estado ? row.estado.toUpperCase() : 'N/D';
-            if (estName.length === 2) estadosMap[estName] = (estadosMap[estName] || 0) + 1;
-
+            // CALCULO IDADE (FILTRO 20 a 65 ANOS + SUPORTE YYYYMMDD)
             if (row.dob) {
                 let anoNasc = 0;
-                const dobStr = String(row.dob);
-                if (dobStr.includes('-')) anoNasc = parseInt(dobStr.split('-')[0]);
-                else if (dobStr.includes('/')) {
-                    const parts = dobStr.split('/');
-                    if (parts.length === 3) anoNasc = parseInt(parts[2]);
-                } else if (dobStr.length === 4) anoNasc = parseInt(dobStr);
+                let dobStr = String(row.dob).replace(/\D/g, ''); // Garante só numeros
 
-                if (anoNasc > 1940 && anoNasc < 2010) {
+                if (row.dob.includes('-')) {
+                     anoNasc = parseInt(row.dob.split('-')[0]);
+                } else if (row.dob.includes('/')) {
+                     const parts = row.dob.split('/');
+                     if (parts.length === 3) anoNasc = parseInt(parts[2]);
+                } else if (dobStr.length === 8) {
+                     // Formato 19850825 -> pega 1985
+                     anoNasc = parseInt(dobStr.substring(0, 4));
+                } else if (dobStr.length === 4) {
+                     anoNasc = parseInt(dobStr);
+                }
+
+                if (anoNasc > 1900 && anoNasc < new Date().getFullYear()) {
                     const idade = new Date().getFullYear() - anoNasc;
-                    if (idade >= 18 && idade <= 75) {
+                    // Filtro rígido: Apenas 20 a 65 anos
+                    if (idade >= 20 && idade <= 65) {
                         somaIdade += idade;
                         qtdIdadeValida++;
                     }
@@ -602,12 +649,16 @@ app.get('/api/kpis', async (req, res) => {
             }
         });
 
-        const sortMap = (map) => Object.entries(map).map(([nome, qtd]) => ({ nome, qtd })).sort((a, b) => b.qtd - a.qtd).slice(0, 5);
-
-        stats.topCampanhas = sortMap(campanhasMap);
-        stats.topAdsets = sortMap(adsetsMap);
-        stats.topEstados = sortMap(estadosMap);
+        stats.matrix = Object.values(matrixMap).sort((a, b) => b.leads - a.leads);
         stats.idadeMedia = qtdIdadeValida > 0 ? Math.round(somaIdade / qtdIdadeValida) : 0;
+
+        const campAgg = {};
+        stats.matrix.forEach(m => {
+            if (!campAgg[m.campaign]) campAgg[m.campaign] = { nome: m.campaign, leads: 0, vendas: 0 };
+            campAgg[m.campaign].leads += m.leads;
+            campAgg[m.campaign].vendas += m.vendas;
+        });
+        stats.topCampanhas = Object.values(campAgg).sort((a, b) => b.leads - a.leads).slice(0, 5);
 
         res.json(stats);
 
@@ -622,7 +673,7 @@ app.get('/api/kpis', async (req, res) => {
 // ============================================================================
 // 7. INICIALIZAÇÃO
 // ============================================================================
-app.get('/', (req, res) => res.send('🟢 Servidor V8.28 (Periodos Corrigidos) Online!'));
+app.get('/', (req, res) => res.send('🟢 Servidor V8.31 (Idade Ajustada) Online!'));
 
 const startServer = async () => {
     try {
